@@ -19,7 +19,7 @@ case $key in
 esac
 done
 
-docker run -v $(pwd)/habitat-challenge-data:/habitat-challenge-data \
+docker run -v $(pwd)/habitat-challenge-data:/habitat-challenge-data -v /coc/dataset/habitat-sim-datasets/mp3d/:/coc/dataset/habitat-sim-datasets/mp3d/ \
     --runtime=nvidia \
     -e "AGENT_EVALUATION_TYPE=local" \
     -e "TRACK_CONFIG_FILE=/challenge_objectnav2020.local.rgbd.yaml" \

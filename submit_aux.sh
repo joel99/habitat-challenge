@@ -1,0 +1,1 @@
+python aux_agent.py --evaluation $AGENT_EVALUATION_TYPE $@
