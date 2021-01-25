@@ -1,0 +1,73 @@
+CHECKPOINT_FOLDER: "/srv/share/jye72/objectnav/"
+LOG_FILE: "runs/objectnav/"
+TENSORBOARD_DIR: "tb/objectnav/"
+VIDEO_DIR: "/srv/share/jye72/vis/videos/objectnav/"
+
+BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_mp3d.yaml"
+TRAINER_NAME: "belief-ddppo" # ppo
+ENV_NAME: "NavExplorationRLEnv"
+SIMULATOR_GPU_ID: 0
+TORCH_GPU_ID: 0
+VIDEO_OPTION: ["disk"] #"disk", "tensorboard"]
+TEST_EPISODE_COUNT: 30 # 312 # 2184 ~ 2 mins per episode - 500 steps, 250 / min, 4 fps???
+NUM_PROCESSES: 4
+SENSORS: ["RGB_SENSOR", "DEPTH_SENSOR"]
+NUM_UPDATES: 100000
+LOG_INTERVAL: 50
+CHECKPOINT_INTERVAL: 1000
+
+RL:
+  SUCCESS_REWARD: 2.5
+  SLACK_REWARD: -0.001
+  COVERAGE_REWARD: 0.25
+  COVERAGE_ATTENUATION: 0.99 # .98 ** ~300 * avg payoff for new grid cell * 0.2 ~= slack
+  COVERAGE_VISIT_EXP: 1
+  PPO:
+    clip_param: 0.2
+    ppo_epoch: 4
+    num_mini_batch: 2
+    value_loss_coef: 0.5
+    entropy_coef: 0.01
+    lr: 2.5e-4
+    eps: 1e-5
+    max_grad_norm: 0.5
+    num_steps: 128
+    hidden_size: 128
+    use_gae: True
+    gamma: 0.99
+    tau: 0.95
+    use_linear_clip_decay: False
+    use_linear_lr_decay: False
+    use_normalized_advantage: False
+    reward_window_size: 50
+    policy: "TRANSFORMER_IM_BELIEF"
+    POLICY:
+      use_mean_and_var: True
+      pretrained_encoder: True
+      pretrained_weights: "/srv/share/ewijmans3/resnet-18-mp3d-rgbd-100m.pth"
+      use_cuda_streams: True
+      IM:
+        comm_interval: 4
+      TRANSFORMER:
+        num_heads: 4
+        num_layers: 1
+  AUX_TASKS:
+    tasks: ["CPCA", "CPCA_A", "GID", "ActionDist", "ActionDist_A", "VisionContrastedSP"]
+    required_sensors: ["SEMANTIC_SENSOR"]
+    entropy_coef: 0.05
+    CPCA:
+      num_steps: 4
+    CPCA_A:
+      num_steps: 16
+    GID:
+      loss_factor: 0.1
+      num_steps: 4
+    ActionDist:
+      loss_factor: 0.25
+      num_steps: -4
+    ActionDist_A:
+      loss_factor: 0.25
+      num_steps: 6
+    SemanticCPCA:
+      loss_factor: 0.05
+      num_steps: 4

@@ -12,8 +12,9 @@ from .belief_policy import (
     RecurrentAttentiveBeliefPolicy,
 )
 from .self_attentive_policy import (
-    TransformerBeliefPolicy, TransformerIMBeliefPolicy, TransformerGatedBeliefPolicy,
-    HiddenTransformerBeliefPolicy, TransformerIMBeliefPolicyNoReLU
+    TransformerIMBeliefPolicy
+    # TransformerBeliefPolicy, TransformerIMBeliefPolicy, TransformerGatedBeliefPolicy,
+    # HiddenTransformerBeliefPolicy, TransformerIMBeliefPolicyNoReLU
 )
 
 # from habitat_baselines.rl.ppo.hierarchical_policy import (
@@ -33,11 +34,11 @@ MULTIPLE_BELIEF_CLASSES = {
     "AVERAGE_BELIEF": AverageBeliefPolicy,
     "SOFTMAX_BELIEF": SoftmaxBeliefPolicy,
     "RECURRENT_ATTENTIVE_BELIEF": RecurrentAttentiveBeliefPolicy,
-    "TRANSFORMER_BELIEF": TransformerBeliefPolicy,
-    "HIDDEN_TRANSFORMER_BELIEF": HiddenTransformerBeliefPolicy,
+    # "TRANSFORMER_BELIEF": TransformerBeliefPolicy,
+    # "HIDDEN_TRANSFORMER_BELIEF": HiddenTransformerBeliefPolicy,
     "TRANSFORMER_IM_BELIEF": TransformerIMBeliefPolicy,
-    "TRANSFORMER_IM_BELIEF_NO_RELU": TransformerIMBeliefPolicyNoReLU,
-    "TRANSFORMER_GATED_BELIEF": TransformerGatedBeliefPolicy,
+    # "TRANSFORMER_IM_BELIEF_NO_RELU": TransformerIMBeliefPolicyNoReLU,
+    # "TRANSFORMER_GATED_BELIEF": TransformerGatedBeliefPolicy,
     # "HIERARCHICAL": HierarchicalPolicy
 }
 

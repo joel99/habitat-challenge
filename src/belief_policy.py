@@ -212,6 +212,8 @@ class BeliefPolicy(Policy):
         observations, actions, vision_embedding, n, t, env_zeros = self.shape_aux_inputs(sample, final_rnn_state)
         belief_features = rnn_features.view(t, n, -1)
         final_belief_state = final_rnn_state[-1] # only use final layer
+        # TODO - we want to put in the same semantic vision to avoid redundant calc
+        # TODO cuda stream here
         return [task.get_loss(observations, actions, vision_embedding, final_belief_state, belief_features, n, t, env_zeros) for task in self.aux_tasks]
 
 class MultipleBeliefNet(SingleBelief):
@@ -229,6 +231,7 @@ class MultipleBeliefNet(SingleBelief):
 
         super().__init__(observation_space, hidden_size, **kwargs)
         self._initialize_fusion_net()
+        self.cuda_streams = None
 
     @property
     def num_recurrent_layers(self):
@@ -238,6 +241,9 @@ class MultipleBeliefNet(SingleBelief):
         self.state_encoders = nn.ModuleList([
             RNNStateEncoder(self._embedding_size, self._hidden_size) for _ in range(self.num_tasks)
         ])
+
+    def set_streams(self, streams):
+        self.cuda_streams = streams
 
     def _initialize_fusion_net(self):
         pass # Do nothing as a default
@@ -249,7 +255,15 @@ class MultipleBeliefNet(SingleBelief):
     def forward(self, visual_embedding, observations, rnn_hidden_states, prev_actions, masks):
         x = self._get_observation_embedding(visual_embedding, observations)
         # rnn_hidden_states.size(): num_layers, num_envs, num_tasks, hidden, (only first timestep)
-        outputs = [encoder(x, rnn_hidden_states[:, :, i], masks) for i, encoder in enumerate(self.state_encoders)]
+        if self.cuda_streams is None:
+            outputs = [encoder(x, rnn_hidden_states[:, :, i], masks) for i, encoder in enumerate(self.state_encoders)]
+        else:
+            outputs = [None] * self.num_tasks
+            torch.cuda.synchronize()
+            for i, encoder in enumerate(self.state_encoders):
+                with torch.cuda.stream(self.cuda_streams[i]):
+                    outputs[i] = encoder(x, rnn_hidden_states[:, :, i], masks)
+            torch.cuda.synchronize()
         embeddings, rnn_hidden_states = zip(*outputs) # (txn)xh, (layers)xnxh
         rnn_hidden_states = torch.stack(rnn_hidden_states, dim=-2) # (layers) x n x k x h
         beliefs = torch.stack(embeddings, dim=-2) # (t x n) x k x h
@@ -267,19 +281,25 @@ class MultipleBeliefPolicy(BeliefPolicy):
         hidden_size,
         net=None,
         aux_tasks=[],
+        num_tasks=0,
         **kwargs,
     ):
         # 0 tasks allowed for eval
         assert len(aux_tasks) != 1, "Multiple beliefs requires more than one auxiliary task"
         assert issubclass(net, MultipleBeliefNet), "Multiple belief policy requires compatible multiple belief net"
+
         super().__init__(
             observation_space,
             action_space,
             hidden_size,
             net,
+            num_tasks=num_tasks,
             aux_tasks=aux_tasks,
             **kwargs,
         )
+        # I think these slow things down atm
+        # self.cuda_streams = [torch.cuda.Stream() for i in range(num_tasks)]
+        # self.net.set_streams(self.cuda_streams)
 
     def act(
         self,
@@ -329,8 +349,19 @@ class MultipleBeliefPolicy(BeliefPolicy):
 
     def evaluate_aux_losses(self, sample, final_rnn_state, rnn_features, individual_rnn_features):
         observations, actions, vision_embedding, n, t, env_zeros = self.shape_aux_inputs(sample, final_rnn_state)
-        return [task.get_loss(observations, actions, vision_embedding, final_rnn_state[-1, :, i].contiguous(), individual_rnn_features[:, i].contiguous().view(t,n,-1), n, t, env_zeros) \
-            for i, task in enumerate(self.aux_tasks)]
+        losses = [None] * len(self.aux_tasks)
+        torch.cuda.synchronize()
+        for i, task in enumerate(self.aux_tasks):
+            losses[i] = \
+                task.get_loss(
+                    observations,
+                    actions,
+                    vision_embedding,
+                    final_rnn_state[-1, :, i].contiguous(),
+                    individual_rnn_features[:, i].contiguous().view(t,n,-1),
+                    n, t, env_zeros
+                )
+        return losses
 
 class AttentiveBelief(MultipleBeliefNet):
     def _initialize_fusion_net(self):
@@ -338,12 +369,14 @@ class AttentiveBelief(MultipleBeliefNet):
         self.key_net = nn.Linear(
             self._embedding_size, self._hidden_size
         )
+        self.scale = math.sqrt(self._hidden_size)
 
     def _fuse_beliefs(self, beliefs, x, *args):
         key = self.key_net(x.unsqueeze(-2))
         # key = self.visual_key_net(x.unsqueeze(-2)) # (t x n) x 1 x h
-        scores = torch.bmm(beliefs, key.transpose(1, 2)) / math.sqrt(self.num_tasks) # scaled dot product
+        scores = torch.bmm(beliefs, key.transpose(1, 2)) / self.scale
         weights = F.softmax(scores, dim=1).squeeze(-1) # n x k (logits) x 1 -> (txn) x k
+
         # n x 1 x k x n x k x h
         contextual_embedding = torch.bmm(weights.unsqueeze(1), beliefs).squeeze(1) # txn x h
         return contextual_embedding, weights

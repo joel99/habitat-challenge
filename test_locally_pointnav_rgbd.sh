@@ -23,5 +23,6 @@ docker run -v $(pwd)/habitat-challenge-data:/habitat-challenge-data \
     --runtime=nvidia \
     -e "AGENT_EVALUATION_TYPE=local" \
     -e "TRACK_CONFIG_FILE=/challenge_pointnav2020.local.rgbd.yaml" \
+    -e "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}" \
     ${DOCKER_NAME}\
 

@@ -11,7 +11,6 @@ import os
 
 import numpy as np
 import torch
-import PIL
 from gym.spaces import Discrete, Dict, Box
 
 import habitat
@@ -112,6 +111,7 @@ class AuxAgent(Agent):
         self.test_recurrent_hidden_states = None
         self.not_done_masks = None
         self.prev_actions = None
+        self.step = 0
 
     def reset(self):
         num_recurrent_memories = self.actor_critic.net.num_tasks
@@ -127,11 +127,12 @@ class AuxAgent(Agent):
         self.prev_actions = torch.zeros(
             1, 1, dtype=torch.long, device=self.device
         )
+        self.step = 0
 
     def act(self, observations):
-        batch = batch_obs([observations])
-        for sensor in batch:
-            batch[sensor] = batch[sensor].to(self.device)
+        # if self.step > 350: # 350: # 350 ~ 24.5 hours, 400 should be ok - just kidding.
+        #     return 0
+        batch = batch_obs([observations], device=self.device)
 
         with torch.no_grad():
             _, actions, _, self.test_recurrent_hidden_states = self.actor_critic.act(
@@ -139,11 +140,12 @@ class AuxAgent(Agent):
                 self.test_recurrent_hidden_states,
                 self.prev_actions,
                 self.not_done_masks,
-                deterministic=True, # False
+                deterministic=False,
             )
             #  Make masks not done till reset (end of episode) will be called
-            self.not_done_masks = torch.ones(1, 1, device=self.device)
+            self.not_done_masks.fill_(1.0)
             self.prev_actions.copy_(actions)
+        self.step += 1
         return actions[0][0].item()
 
 

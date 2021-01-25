@@ -27,7 +27,7 @@ _C.TORCH_GPU_ID = 0
 _C.VIDEO_OPTION = ["disk", "tensorboard"]
 _C.TENSORBOARD_DIR = "tb"
 _C.VIDEO_DIR = "video_dir"
-_C.TEST_EPISODE_COUNT = 2
+_C.TEST_EPISODE_COUNT = -1
 _C.EVAL_CKPT_PATH_DIR = "data/checkpoints"  # path to ckpt or path to ckpts dir
 _C.NUM_PROCESSES = 16
 _C.SENSORS = ["RGB_SENSOR", "DEPTH_SENSOR"]
@@ -51,7 +51,9 @@ _C.RL.REWARD_MEASURE = "distance_to_goal"
 _C.RL.SUCCESS_MEASURE = "spl"
 _C.RL.SUCCESS_REWARD = 2.5
 _C.RL.SLACK_REWARD = -0.01
-_C.RL.COVERAGE_REWARD = 0.05
+_C.RL.COVERAGE_REWARD = 0.25
+_C.RL.COVERAGE_ATTENUATION = 0.99
+_C.RL.COVERAGE_VISIT_EXP = 1
 # -----------------------------------------------------------------------------
 # PROXIMAL POLICY OPTIMIZATION (PPO)
 # -----------------------------------------------------------------------------
@@ -80,6 +82,11 @@ _C.RL.PPO.POLICY.name = "BASELINE"
 _C.RL.PPO.POLICY.use_mean_and_var = False
 _C.RL.PPO.POLICY.pretrained_encoder = False
 _C.RL.PPO.POLICY.pretrained_weights = "/srv/share/ewijmans3/resnet-18-mp3d-rgbd-100m.pth"
+_C.RL.PPO.POLICY.use_cuda_streams = False
+_C.RL.PPO.POLICY.TRANSFORMER = CN()
+_C.RL.PPO.POLICY.TRANSFORMER.num_heads = 6
+_C.RL.PPO.POLICY.TRANSFORMER.num_layers = 1
+
 _C.RL.PPO.POLICY.HIERARCHICAL = CN()
 _C.RL.PPO.POLICY.HIERARCHICAL.type = "linear" # linear, custom, all_for_one
 _C.RL.PPO.POLICY.HIERARCHICAL.dependencies = () # A tuple representing a DAG OR a string representing a type
@@ -142,6 +149,7 @@ _C.RL.AUX_TASKS.CPCA = CN()
 _C.RL.AUX_TASKS.CPCA.loss_factor = 0.05
 _C.RL.AUX_TASKS.CPCA.num_steps = 1
 _C.RL.AUX_TASKS.CPCA.subsample_rate = 0.2
+_C.RL.AUX_TASKS.CPCA.sample = "random"
 
 _C.RL.AUX_TASKS.CPCA_A = _C.RL.AUX_TASKS.CPCA.clone()
 _C.RL.AUX_TASKS.CPCA_A.num_steps = 2
@@ -158,6 +166,11 @@ _C.RL.AUX_TASKS.CPCA_D.num_steps = 16
 _C.RL.AUX_TASKS.CPCA_Weighted = CN()
 _C.RL.AUX_TASKS.CPCA_Weighted.loss_factor = 0.05
 _C.RL.AUX_TASKS.CPCA_Weighted.subsample_rate = 0.2
+
+_C.RL.AUX_TASKS.SemanticCPCA = CN()
+_C.RL.AUX_TASKS.SemanticCPCA.loss_factor = 0.05
+_C.RL.AUX_TASKS.SemanticCPCA.num_steps = 4
+_C.RL.AUX_TASKS.SemanticCPCA.subsample_rate = 0.2
 
 _C.RL.AUX_TASKS.GID = CN()
 _C.RL.AUX_TASKS.GID.loss_factor = 0.2
@@ -178,7 +191,7 @@ _C.RL.AUX_TASKS.SensorPrediction.subsample_rate = 0.2
 _C.RL.AUX_TASKS.SensorPrediction.goal = "objectgoal"
 
 _C.RL.AUX_TASKS.VisionContrastedSP = CN()
-_C.RL.AUX_TASKS.VisionContrastedSP.loss_factor = 0.05
+_C.RL.AUX_TASKS.VisionContrastedSP.loss_factor = 0.1
 _C.RL.AUX_TASKS.VisionContrastedSP.subsample_rate = 0.2
 _C.RL.AUX_TASKS.VisionContrastedSP.sensor = "semantic"
 

@@ -1,26 +1,29 @@
-BASE_TASK_CONFIG_PATH: "configs/challenge_objectnav2020.local.rgbd.yaml"
-TRAINER_NAME: "ddppo"
-ENV_NAME: "NavRLEnv"
+CHECKPOINT_FOLDER: "/srv/share/jye72/objectnav/"
+LOG_FILE: "runs/objectnav/"
+TENSORBOARD_DIR: "tb/objectnav/"
+VIDEO_DIR: "/srv/share/jye72/vis/videos/objectnav/"
+
+BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_mp3d.yaml"
+TRAINER_NAME: "belief-ddppo" # ppo
+ENV_NAME: "NavExplorationRLEnv"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
-VIDEO_OPTION: []
-TENSORBOARD_DIR: "tb"
-VIDEO_DIR: "video_dir"
-TEST_EPISODE_COUNT: 994
-EVAL_CKPT_PATH_DIR: "data/new_checkpoints"
+VIDEO_OPTION: [] #"disk"] #"disk", "tensorboard"]
+TEST_EPISODE_COUNT: 30 # 312 # 2184 ~ 2 mins per episode - 500 steps, 250 / min, 4 fps???
 NUM_PROCESSES: 4
-SENSORS: ["RGB_SENSOR" , "DEPTH_SENSOR"]
-CHECKPOINT_FOLDER: "data/new_checkpoints"
-NUM_UPDATES: 10000
-LOG_INTERVAL: 10
-CHECKPOINT_INTERVAL: 50
+SENSORS: ["RGB_SENSOR", "DEPTH_SENSOR"]
+NUM_UPDATES: 100000
+LOG_INTERVAL: 50
+CHECKPOINT_INTERVAL: 1000
 
 RL:
   SUCCESS_REWARD: 2.5
   SLACK_REWARD: -0.001
-  COVERAGE_REWARD: 0.1
+  COVERAGE_REWARD: 0.25
+  COVERAGE_ATTENUATION: 0.99 # .98 ** ~300 * avg payoff for new grid cell * 0.2 ~= slack
+  COVERAGE_VISIT_EXP: 1
   PPO:
-    clip_param: 0.1
+    clip_param: 0.2
     ppo_epoch: 4
     num_mini_batch: 2
     value_loss_coef: 0.5
@@ -29,7 +32,7 @@ RL:
     eps: 1e-5
     max_grad_norm: 0.5
     num_steps: 128
-    hidden_size: 228
+    hidden_size: 128
     use_gae: True
     gamma: 0.99
     tau: 0.95
@@ -40,14 +43,20 @@ RL:
     policy: "TRANSFORMER_IM_BELIEF"
     POLICY:
       use_mean_and_var: True
+      pretrained_encoder: True
+      pretrained_weights: "/srv/share/ewijmans3/resnet-18-mp3d-rgbd-100m.pth"
+      IM:
+        comm_interval: 32
+      TRANSFORMER:
+        num_heads: 4
+        num_layers: 1
   AUX_TASKS:
-    tasks: ["CPCA", "CPCA_A", "CPCA_B", "GID", "ActionDist", "ActionDist_A"]
-    entropy_coef: 0.1
+    tasks: ["CPCA", "CPCA_A", "GID", "ActionDist", "ActionDist_A", "VisionContrastedSP"]
+    required_sensors: ["SEMANTIC_SENSOR"]
+    entropy_coef: 0.025
     CPCA:
       num_steps: 4
     CPCA_A:
-      num_steps: 8
-    CPCA_B:
       num_steps: 16
     GID:
       loss_factor: 0.1
@@ -58,3 +67,6 @@ RL:
     ActionDist_A:
       loss_factor: 0.25
       num_steps: 6
+    SemanticCPCA:
+      loss_factor: 0.05
+      num_steps: 4
