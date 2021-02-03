@@ -14,11 +14,16 @@ import torch
 from gym.spaces import Discrete, Dict, Box
 
 import habitat
-from src.default import get_config
-from src import POLICY_CLASSES
-from habitat_baselines.common.utils import batch_obs
 from habitat import Config
 from habitat.core.agent import Agent
+from habitat_baselines.common.utils import batch_obs
+
+from src.default import get_config
+from src import POLICY_CLASSES
+from src.models.rednet import load_rednet
+from src.encoder_dict import (
+    get_vision_encoder_inputs
+)
 
 class AuxAgent(Agent):
     def __init__(self, config: Config):
@@ -46,7 +51,8 @@ class AuxAgent(Agent):
             "gps": Box(
                 low=np.finfo(np.float32).min,
                 high=np.finfo(np.float32).max,
-                shape=(2,),
+                shape=(3,), # Spoofed
+                # shape=(2,),
                 dtype=np.float32,
             ),
             "compass": Box(low=-np.pi, high=np.pi, shape=(1,), dtype=np.float)
@@ -56,13 +62,18 @@ class AuxAgent(Agent):
 
         action_spaces = Discrete(4) # ! change to six if we're running action v1
 
+        random.seed(config.RANDOM_SEED)
+        torch.random.manual_seed(config.RANDOM_SEED)
+        torch.backends.cudnn.deterministic = True
+
         self.device = torch.device("cuda:{}".format(config.TORCH_GPU_ID))
         self.hidden_size = config.RL.PPO.hidden_size
 
-        self.aux_cfg = config.RL.AUX_TASKS
+        aux_cfg = config.RL.AUX_TASKS
         ppo_cfg = config.RL.PPO
         task_cfg = config.TASK_CONFIG.TASK
 
+        # Prep agent
         is_objectnav = "ObjectNav" in task_cfg.TYPE
         additional_sensors = []
         embed_goal = False
@@ -70,39 +81,64 @@ class AuxAgent(Agent):
             additional_sensors = ["gps", "compass"]
             embed_goal = True
 
-        random.seed(config.RANDOM_SEED)
-        torch.random.manual_seed(config.RANDOM_SEED)
-        torch.backends.cudnn.deterministic = True
+        def _get_policy_head_count(config):
+            reward_keys = config.RL.POLICIES
+            if reward_keys[0] == "none" and len(reward_keys) == 1:
+                return 1
+            if config.RL.REWARD_FUSION.STRATEGY == "SPLIT":
+                return 2
+            return 1
 
-        policy_class = POLICY_CLASSES[ppo_cfg.policy]
+        policy_class = POLICY_CLASSES[ppo_cfg.POLICY.name]
+
+        policy_encoders = get_vision_encoder_inputs(ppo_cfg)
 
         self.actor_critic = policy_class(
             observation_space=observation_spaces,
             action_space=action_spaces,
             hidden_size=self.hidden_size,
-            aux_tasks=self.aux_cfg.tasks,
             goal_sensor_uuid=task_cfg.GOAL_SENSOR_UUID,
-            num_tasks=len(self.aux_cfg.tasks), # we pass this is in to support eval, where no aux modules are made
+            num_tasks=len(aux_cfg.tasks), # we pass this is in to support eval, where no aux modules are made
             additional_sensors=additional_sensors,
             embed_goal=embed_goal,
             device=self.device,
-            config=ppo_cfg.POLICY
+            config=ppo_cfg.POLICY,
+            policy_encoders=policy_encoders,
+            num_policy_heads=_get_policy_head_count(config),
+            mock_objectnav=config.MOCK_OBJECTNAV
         ).to(self.device)
 
         self.actor_critic.to(self.device)
 
+        self.semantic_predictor = None
+        if ppo_cfg.POLICY.USE_SEMANTICS:
+            self.semantic_predictor = load_rednet(
+                self.device,
+                ckpt="ckpts/rednet.pth" # ppo_cfg.POLICY.EVAL_SEMANTICS_CKPT
+            )
+            self.semantic_predictor.eval()
+
+        self.num_recurrent_memories = self.actor_critic.net.num_tasks
+        if self.actor_critic.IS_MULTIPLE_BELIEF:
+            proposed_num_beliefs = ppo_cfg.POLICY.BELIEFS.NUM_BELIEFS
+            self.num_recurrent_memories = len(aux_cfg.tasks) if proposed_num_beliefs == -1 else proposed_num_beliefs
+            if self.actor_critic.IS_RECURRENT:
+                self.num_recurrent_memories += 1
+
         if config.MODEL_PATH:
-            ckpt = torch.load(config.MODEL_PATH, map_location=self.device)
-            #  Filter only actor_critic weights
-            # ! TODO - do our checkpoints start with actor critic?
+            ckpt_dict = torch.load(config.MODEL_PATH, map_location=self.device)
             self.actor_critic.load_state_dict(
                 {
                     k.replace("actor_critic.", ""): v
-                    for k, v in ckpt["state_dict"].items()
+                    for k, v in ckpt_dict["state_dict"].items()
                     if "actor_critic" in k
                 }
             )
-
+            self.behavioral_index = 0
+            if "extra_state" in ckpt_dict and "step" in ckpt_dict["extra_state"]:
+                count_steps = ckpt_dict["extra_state"]["step"]
+                if _get_policy_head_count(config) > 1 and count_steps > config.RL.REWARD_FUSION.SPLIT.TRANSITION:
+                    self.behavioral_index = 1
         else:
             habitat.logger.error(
                 "Model checkpoint wasn't loaded, evaluating " "a random model."
@@ -114,11 +150,10 @@ class AuxAgent(Agent):
         self.step = 0
 
     def reset(self):
-        num_recurrent_memories = self.actor_critic.net.num_tasks
         self.test_recurrent_hidden_states = torch.zeros(
             self.actor_critic.net.num_recurrent_layers,
             1, # num_processes
-            num_recurrent_memories,
+            self.num_recurrent_memories,
             self.hidden_size,
             device=self.device,
         )
@@ -132,7 +167,36 @@ class AuxAgent(Agent):
     def act(self, observations):
         # if self.step > 350: # 350: # 350 ~ 24.5 hours, 400 should be ok - just kidding.
         #     return 0
-        batch = batch_obs([observations], device=self.device)
+        batch = batch_obs([observations], device=self.device) # Why is this put in a list?
+        # for key in batch:
+        #     print(batch[key].size())
+        if self.semantic_predictor is not None:
+            batch["semantic"] = self.semantic_predictor(batch["rgb"], batch["depth"])
+
+        # print(batch['rgb'].mean(), batch['rgb'].std())
+        # print(batch['depth'].mean(), batch['depth'].std())
+        # print(batch['semantic'].size(), batch['semantic'].sum())
+        # print("done")
+
+        # import pdb
+        # pdb.set_trace()
+
+        # Substitute 3D GPS (2D provided noted in `nav.py`)
+        # B x H -> B x H + 1
+
+        # if self._dimensionality == 2:
+        #     return np.array(
+        #         [-agent_position[2], agent_position[0]], dtype=np.float32
+        #     )
+        # else:
+        #     return agent_position.astype(np.float32)
+
+        if batch['gps'].size(-1) == 2:
+            batch["gps"] = torch.stack([
+                batch["gps"][:, 1],
+                torch.zeros(batch["gps"].size(0), dtype=batch["gps"].dtype, device=self.device),
+                -batch["gps"][:, 0],
+            ], axis=-1)
 
         with torch.no_grad():
             _, actions, _, self.test_recurrent_hidden_states = self.actor_critic.act(
@@ -140,7 +204,9 @@ class AuxAgent(Agent):
                 self.test_recurrent_hidden_states,
                 self.prev_actions,
                 self.not_done_masks,
+                # deterministic=True,
                 deterministic=False,
+                behavioral_index=self.behavioral_index,
             )
             #  Make masks not done till reset (end of episode) will be called
             self.not_done_masks.fill_(1.0)
@@ -157,7 +223,8 @@ def main():
     parser.add_argument("--config-path", type=str, required=True, default="configs/aux_objectnav.yaml")
     args = parser.parse_args()
 
-    config = get_config(args.config_path,
+    DEFAULT_CONFIG = "configs/obj_base.yaml"
+    config = get_config([DEFAULT_CONFIG, args.config_path],
                 ['BASE_TASK_CONFIG_PATH', config_paths]).clone()
     config.defrost()
     config.TORCH_GPU_ID = 0

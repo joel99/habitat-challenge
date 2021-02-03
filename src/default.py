@@ -17,7 +17,11 @@ CONFIG_FILE_SEPARATOR = ","
 # EXPERIMENT CONFIG
 # -----------------------------------------------------------------------------
 _C = CN()
+_C.DEBUG = False # Debug all the things
+
+# task config can be a list of conifgs like "A.yaml,B.yaml"
 _C.BASE_TASK_CONFIG_PATH = "configs/tasks/pointnav.yaml"
+_C.MOCK_OBJECTNAV = False # Hardcode bypass to fake semantics and objectgoal in env that doesn't have it.
 _C.TASK_CONFIG = CN()  # task_config will be stored as a config node
 _C.CMD_TRAILING_OPTS = []  # store command line options as list of strings
 _C.TRAINER_NAME = "ppo"
@@ -36,6 +40,7 @@ _C.NUM_UPDATES = 10000
 _C.LOG_INTERVAL = 10
 _C.LOG_FILE = "train.log"
 _C.CHECKPOINT_INTERVAL = 50
+_C.FORCE_BLIND_POLICY = False
 # -----------------------------------------------------------------------------
 # EVAL CONFIG
 # -----------------------------------------------------------------------------
@@ -43,10 +48,13 @@ _C.EVAL = CN()
 # The split to evaluate on
 _C.EVAL.SPLIT = "val"
 _C.EVAL.USE_CKPT_CONFIG = True
+_C.EVAL.DETERMIISTIC = False
 # -----------------------------------------------------------------------------
 # REINFORCEMENT LEARNING (RL) ENVIRONMENT CONFIG
 # -----------------------------------------------------------------------------
 _C.RL = CN()
+_C.RL.fp16_mode = "off" # off, autocast, mixed
+
 _C.RL.REWARD_MEASURE = "distance_to_goal"
 _C.RL.SUCCESS_MEASURE = "spl"
 _C.RL.SUCCESS_REWARD = 2.5
@@ -54,6 +62,43 @@ _C.RL.SLACK_REWARD = -0.01
 _C.RL.COVERAGE_REWARD = 0.25
 _C.RL.COVERAGE_ATTENUATION = 0.99
 _C.RL.COVERAGE_VISIT_EXP = 1
+_C.RL.COVERAGE_BONUS_SCALE = 0.5 # We see coverages of around 5-10
+_C.RL.COVERAGE_FALLOFF_RADIUS = 2.0
+_C.RL.COVERAGE_TYPE = "VISIT" # Or "FOG_OF_WAR"
+_C.RL.EXPLORE_GOAL_SEEN_THRESHOLD = 0.05 # Transition for ExploreThenNav
+_C.RL.POLICIES = ["none"] # specifies reward measures used to train policy (actor + critic) heads
+# the key named corresponds to the reward (metric) that pair uses
+# Note that the first key will have the env reward added to it
+# "none" is also a special keyword, indicating no rewards are used
+# e.g. if just "none", we default to just the RL env (the baseline)
+# use "ExploreRLReward" and "ObjectNavReward" to have a slack-driven exploration, and then objectnav.
+_C.RL.REWARD_FUSION = CN()
+_C.RL.REWARD_FUSION.STRATEGY = "SUM" # sum with reward -> might as well put it all into the env
+# SUM - add rewards, i.e. equivalent to having a single env.
+# RAMP and SPLIT both are intended for 2 rewards.
+# If there are more than 2, they will be grouped into [0, l-2], {l-1}
+# RAMP - phase between 2 rewards
+# SPLIT - two sets of policy (actor/critic) heads.
+
+_C.RL.REWARD_FUSION.ENV_ON_ALL = True # Apply env reward everywhere
+# ^ a quick hack to only apply slack to first reward
+
+_C.RL.REWARD_FUSION.RAMP = CN() # only supports 2
+_C.RL.REWARD_FUSION.RAMP.START = 0.0 # `count_steps`
+_C.RL.REWARD_FUSION.RAMP.END = 5.0e7
+
+_C.RL.REWARD_FUSION.SPLIT = CN()
+_C.RL.REWARD_FUSION.SPLIT.TRANSITION = 3e7 # change from following policy 1 to policy 2
+_C.RL.REWARD_FUSION.SPLIT.IMPORTANCE_WEIGHT = False # add importance weighting to target policy updates
+# ^ only implemented for use_gae = true
+
+# -----------------------------------------------------------------------------
+# POLICY CONFIG
+# -----------------------------------------------------------------------------
+_C.RL.POLICY = CN()
+_C.RL.POLICY.name = "PointNavBaselinePolicy"
+_C.RL.POLICY.PRETRAINED_CKPT = "" # Will load in ckpt (assuming identical arch). Used as quick hack for transplanting reward
+
 # -----------------------------------------------------------------------------
 # PROXIMAL POLICY OPTIMIZATION (PPO)
 # -----------------------------------------------------------------------------
@@ -75,28 +120,110 @@ _C.RL.PPO.gamma = 0.99
 _C.RL.PPO.tau = 0.95
 _C.RL.PPO.reward_window_size = 50
 
+# Rollout
+_C.RL.PPO.ROLLOUT = CN()
+_C.RL.PPO.ROLLOUT.METRICS = [] # 'reached', 'visit_count', 'goal_vis']
+
+
 # Policy
-_C.RL.PPO.policy = "BASELINE"
+_C.RL.PPO.policy = "BASELINE" # Legacy
 _C.RL.PPO.POLICY = CN()
-_C.RL.PPO.POLICY.name = "BASELINE"
+_C.RL.PPO.POLICY.name = "BASELINE" # This is the one that's actually used.
+_C.RL.PPO.POLICY.jit = False # JIT entire policy if possible
+_C.RL.PPO.POLICY.FULL_RESNET = False
+
 _C.RL.PPO.POLICY.use_mean_and_var = False
 _C.RL.PPO.POLICY.pretrained_encoder = False
 _C.RL.PPO.POLICY.pretrained_weights = "/srv/share/ewijmans3/resnet-18-mp3d-rgbd-100m.pth"
 _C.RL.PPO.POLICY.use_cuda_streams = False
+_C.RL.PPO.POLICY.embed_actions = False
+_C.RL.PPO.POLICY.embed_sge = False # feature engineering, yay
+_C.RL.PPO.POLICY.input_drop = 0.1
+_C.RL.PPO.POLICY.output_drop = 0.0 # dropout from after core
+_C.RL.PPO.POLICY.midlevel_medium = 'depth_zbuffer' # "depth_zbuffer"
+_C.RL.PPO.POLICY.ACTOR_HEAD_LAYERS = 1
+_C.RL.PPO.POLICY.CRITIC_HEAD_LAYERS = 1
+
+_C.RL.PPO.POLICY.DOUBLE_PREPROCESS_BUG = True # ! This should be flagged off going forward.
+
+_C.RL.PPO.POLICY.MULTI_POLICY = CN() # Very hardcoded for now.
+_C.RL.PPO.POLICY.MULTI_POLICY.USE_RAMP = False # Will switch to something more sophisticated if warranted.
+_C.RL.PPO.POLICY.MULTI_POLICY.END_RAMP = 5e7 # Agent reward is going to be (1 - STEP/RAMP) * curiosity + STEP/RAMP * obj
+
+# Let's see... we want multipolicy.
+
 _C.RL.PPO.POLICY.TRANSFORMER = CN()
 _C.RL.PPO.POLICY.TRANSFORMER.num_heads = 6
 _C.RL.PPO.POLICY.TRANSFORMER.num_layers = 1
+_C.RL.PPO.POLICY.TRANSFORMER.dropout_p = 0.0
+_C.RL.PPO.POLICY.TRANSFORMER.embed_module = True # Add embedding for module identity
+_C.RL.PPO.POLICY.TRANSFORMER.embed_message_flag = True # Add embedding for message sent
+_C.RL.PPO.POLICY.TRANSFORMER.prenorm = True # Prenorm transformer (transformers without tears)
+
+_C.RL.PPO.POLICY.MESSAGING = CN()
+_C.RL.PPO.POLICY.MESSAGING.interval = 16
+
+_C.RL.PPO.POLICY.CREAM = CN() # Generally for SCREAM parameters - controlling sparsity as in RIMs
+_C.RL.PPO.POLICY.CREAM.input_attn_dim = 8
+_C.RL.PPO.POLICY.CREAM.topk = 4 #
+# By default, inactive modules only receive zeroed input and can still update
+_C.RL.PPO.POLICY.CREAM.block_inactive_comms = False # Whether inactive modules should receive comms
+_C.RL.PPO.POLICY.CREAM.block_inactive_updates = False # Whether inactivate modules should update state
+_C.RL.PPO.POLICY.CREAM.group_linear = False # Use efficient grouped linear layer
+_C.RL.PPO.POLICY.CREAM.static_modules = []
+
+_C.RL.PPO.POLICY.UNFUSED = CN()
+_C.RL.PPO.POLICY.UNFUSED.actor_index = 0
+_C.RL.PPO.POLICY.UNFUSED.critic_index = 1
+_C.RL.PPO.POLICY.BLOCKING = CN() # Detach encoder path to policy. In our use case, still allow flow from semantic task
+# Which modules (by index) has aux task affecting encoder (designed for semantic task)
+# Modules with beliefs/tasks affecting encoder will not get gradients from policy
+_C.RL.PPO.POLICY.BLOCKING.use_belief_aux_gradients = []
 
 _C.RL.PPO.POLICY.HIERARCHICAL = CN()
 _C.RL.PPO.POLICY.HIERARCHICAL.type = "linear" # linear, custom, all_for_one
 _C.RL.PPO.POLICY.HIERARCHICAL.dependencies = () # A tuple representing a DAG OR a string representing a type
 
-_C.RL.PPO.POLICY.IM = CN()
-_C.RL.PPO.POLICY.IM.comm_interval = 16
+
+_C.RL.PPO.CURIOSITY = CN() # ! Note. not supported for single beliefs
+_C.RL.PPO.CURIOSITY.USE_CURIOSITY = False
+_C.RL.PPO.CURIOSITY.REWARD_SCALE = 0.1
+_C.RL.PPO.CURIOSITY.LOSS_SCALE = 0.1
+_C.RL.PPO.CURIOSITY.BLOCK_ENCODER_GRADIENTS = True # No gradients back to e.g. CNN, agent
+_C.RL.PPO.CURIOSITY.USE_INVERSE_SPACE = False
+_C.RL.PPO.CURIOSITY.USE_BELIEF = False # Is curiosity conditioned on belief? (episodic curiosity)
+_C.RL.PPO.CURIOSITY.INVERSE_BETA = 0.8 # Tradeoff inverse loss and forward loss
+_C.RL.PPO.CURIOSITY.HIDDEN_SIZE = 256 # Pathak's default hidden size # ! Not used after we introduced belief! Sharing one hidden size
+_C.RL.PPO.CURIOSITY.VISION_KEY = "rgbd" # highly prefer "semantic" if available, since it'll have simpler statistics that we also care about more
+
+# Which encoders to feed into our beliefs. "all", "rgb", "rgbd", "semantic". Whaa... the modules aren't even gonna be the same size at all...s
+_C.RL.PPO.POLICY.BELIEFS = CN()
+_C.RL.PPO.POLICY.BELIEFS.NUM_BELIEFS = -1 # Default to num aux tasks. They'll all have the same hidden size, just not the
+# ! ^ Not fully implemented
+
+# Map to encoders to use (rgb, d, semantic)
+# (encoders should be registered..?)
+# should be length 1 (concat all available features) or length NUM_BELIEFS.
+# "all" means to concat all available features.
+# Supports: "all", "semantic", "rgbd"
+_C.RL.PPO.POLICY.BELIEFS.ENCODERS = ["rgbd"]
+
+# Map task index to belief index. Should be a list of len(tasks), with elements in range(NUM_BELIEFS).
+# If empty, will default to range(len(tasks)).
+# NOTE. NUM_BELIEFS check is not asserted. Be careful.
+# Originally implemented to investigated SGE
+_C.RL.PPO.POLICY.BELIEFS.AUX_MAP = []
+_C.RL.PPO.POLICY.BELIEFS.OBS_KEY = "rgbd" # Used for fusion
+_C.RL.PPO.POLICY.BELIEFS.POLICY_INDEX = 0 # Used for comms policy
+
+_C.RL.PPO.POLICY.USE_SEMANTICS = False # Feed semantic to policy.
+_C.RL.PPO.POLICY.EVAL_GT_SEMANTICS = False # Experimental - we'll keep semantics on at test as well, just to see. Otherwise, default to rednet ckpt (specified below)
+_C.RL.PPO.POLICY.EVAL_SEMANTICS_CKPT = "/srv/share/jye72/rednet/rednet_semmap_mp3d_tuned.pth"
 
 # Auxiliary Tasks
 _C.RL.AUX_TASKS = CN()
 _C.RL.AUX_TASKS.tasks = []
+
 _C.RL.AUX_TASKS.required_sensors = []
 _C.RL.AUX_TASKS.distribution = "uniform" # one-hot, TODO gaussian
 _C.RL.AUX_TASKS.entropy_coef = 0.0
@@ -150,6 +277,7 @@ _C.RL.AUX_TASKS.CPCA.loss_factor = 0.05
 _C.RL.AUX_TASKS.CPCA.num_steps = 1
 _C.RL.AUX_TASKS.CPCA.subsample_rate = 0.2
 _C.RL.AUX_TASKS.CPCA.sample = "random"
+_C.RL.AUX_TASKS.CPCA.dropout = 0.0
 
 _C.RL.AUX_TASKS.CPCA_A = _C.RL.AUX_TASKS.CPCA.clone()
 _C.RL.AUX_TASKS.CPCA_A.num_steps = 2
@@ -171,6 +299,15 @@ _C.RL.AUX_TASKS.SemanticCPCA = CN()
 _C.RL.AUX_TASKS.SemanticCPCA.loss_factor = 0.05
 _C.RL.AUX_TASKS.SemanticCPCA.num_steps = 4
 _C.RL.AUX_TASKS.SemanticCPCA.subsample_rate = 0.2
+_C.RL.AUX_TASKS.SemanticCPCA.dropout = 0.0
+
+_C.RL.AUX_TASKS.SemanticCPCA_A = _C.RL.AUX_TASKS.SemanticCPCA.clone()
+_C.RL.AUX_TASKS.SemanticCPCA_A.num_steps = 16
+
+_C.RL.AUX_TASKS.SemanticGoalExists = CN()
+_C.RL.AUX_TASKS.SemanticGoalExists.loss_factor = 0.5
+_C.RL.AUX_TASKS.SemanticGoalExists.subsample_rate = 0.2
+_C.RL.AUX_TASKS.SemanticGoalExists.threshold = 0.01 # detection threshold. Approx a 10 x 10 in 256 x 256
 
 _C.RL.AUX_TASKS.GID = CN()
 _C.RL.AUX_TASKS.GID.loss_factor = 0.2
@@ -185,6 +322,11 @@ _C.RL.AUX_TASKS.ActionDist.subsample_rate = 0.2
 _C.RL.AUX_TASKS.ActionDist_A = _C.RL.AUX_TASKS.ActionDist.clone()
 _C.RL.AUX_TASKS.ActionDist_A.num_steps = 2
 
+_C.RL.AUX_TASKS.ContrastiveRecall = CN()
+_C.RL.AUX_TASKS.ContrastiveRecall.num_steps = 32
+_C.RL.AUX_TASKS.ContrastiveRecall.loss_factor = 0.2
+_C.RL.AUX_TASKS.ContrastiveRecall.subsmaple_rate = 0.2
+
 _C.RL.AUX_TASKS.SensorPrediction = CN()
 _C.RL.AUX_TASKS.SensorPrediction.loss_factor = 0.05
 _C.RL.AUX_TASKS.SensorPrediction.subsample_rate = 0.2
@@ -195,6 +337,20 @@ _C.RL.AUX_TASKS.VisionContrastedSP.loss_factor = 0.1
 _C.RL.AUX_TASKS.VisionContrastedSP.subsample_rate = 0.2
 _C.RL.AUX_TASKS.VisionContrastedSP.sensor = "semantic"
 
+_C.RL.AUX_TASKS.CoveragePrediction = CN()
+_C.RL.AUX_TASKS.CoveragePrediction.loss_factor = 0.1
+_C.RL.AUX_TASKS.CoveragePrediction.num_steps = 16
+_C.RL.AUX_TASKS.CoveragePrediction.subsample_rate = 0.2
+_C.RL.AUX_TASKS.CoveragePrediction.key = "reached"
+_C.RL.AUX_TASKS.CoveragePrediction.regression = True
+_C.RL.AUX_TASKS.CoveragePrediction.hidden_size = 16
+
+_C.RL.AUX_TASKS.PBL = CN()
+_C.RL.AUX_TASKS.PBL.loss_factor = 0.15
+_C.RL.AUX_TASKS.PBL.num_steps = 1
+_C.RL.AUX_TASKS.PBL.subsample_rate = 0.2
+_C.RL.AUX_TASKS.PBL.sample = "random"
+
 _C.RL.AUX_TASKS.Dummy = CN()
 
 _C.RL.PPO.use_normalized_advantage = True
@@ -204,7 +360,7 @@ _C.RL.PPO.hidden_size = 512
 # -----------------------------------------------------------------------------
 _C.RL.DDPPO = CN()
 _C.RL.DDPPO.sync_frac = 0.6
-_C.RL.DDPPO.distrib_backend = "GLOO"
+_C.RL.DDPPO.distrib_backend = "NCCL"
 _C.RL.DDPPO.rnn_type = "LSTM"
 _C.RL.DDPPO.num_recurrent_layers = 2
 _C.RL.DDPPO.backbone = "resnet50"
@@ -252,15 +408,17 @@ def get_config(
     opts: Optional[list] = None,
 ) -> CN:
     r"""Create a unified config with default values overwritten by values from
-    `config_paths` and overwritten by options from `opts`.
+    :ref:`config_paths` and overwritten by options from :ref:`opts`.
+
     Args:
         config_paths: List of config paths or string that contains comma
         separated list of config paths.
         opts: Config options (keys, values) in a list (e.g., passed from
-        command line into the config. For example, `opts = ['FOO.BAR',
-        0.5]`. Argument can be used for parameter sweeping or quick tests.
+        command line into the config. For example, ``opts = ['FOO.BAR',
+        0.5]``. Argument can be used for parameter sweeping or quick tests.
     """
     config = _C.clone()
+
     if config_paths:
         if isinstance(config_paths, str):
             if CONFIG_FILE_SEPARATOR in config_paths:
@@ -270,14 +428,16 @@ def get_config(
 
         for config_path in config_paths:
             config.merge_from_file(config_path)
+
     if opts:
         for k, v in zip(opts[0::2], opts[1::2]):
             if k == "BASE_TASK_CONFIG_PATH":
                 config.BASE_TASK_CONFIG_PATH = v
+
     config.TASK_CONFIG = get_task_config(config.BASE_TASK_CONFIG_PATH)
     if opts:
-        config.CMD_TRAILING_OPTS = opts
-        config.merge_from_list(opts)
+        config.CMD_TRAILING_OPTS = config.CMD_TRAILING_OPTS + opts
+        config.merge_from_list(config.CMD_TRAILING_OPTS)
 
     config.freeze()
     return config

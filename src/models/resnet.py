@@ -3,15 +3,14 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
+from typing import List, Dict, Optional
+from math import ceil
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .running_mean_and_var import (
-    RunningMeanAndVar,
-)
 
-from habitat_baselines.common.utils import (
+from .common import (
     ResizeCenterCropper,
 )
 
@@ -355,10 +354,14 @@ class ResNetEncoder(nn.Module):
         ngroups=32,
         spatial_size=128,
         make_backbone=None,
-        use_if_available=["rgb", "depth"],
-        normalize_visual_inputs=True,
+        use_if_available=["rgb", "depth"], # ! This needs to be updated appropriately to just use what it's configured to. Not if available.
         obs_transform=ResizeCenterCropper(size=(256, 256)),
+        mock_semantics=False,
     ):
+        for mode in use_if_available:
+            assert mode in ["rgb", "depth", "semantic"] # enum check
+        self.semantic_embedder: Optional[nn.Embedding] = None
+        self.mock_semantics = mock_semantics
         super().__init__()
 
         self.obs_transform = obs_transform
@@ -368,8 +371,12 @@ class ResNetEncoder(nn.Module):
             )
 
 
-        self._inputs = list(filter(lambda x: x in observation_space.spaces, use_if_available))
+        # if ppo_cfg.POLICY.USE_SEMANTICS and not ppo_cfg.POLICY.EVAL_GT_SEMANTICS
+        # ! We should really be checking for ^, but we're just assuming it'll be filled in for now
+
+        self._inputs = list(filter(lambda x: x in observation_space.spaces or x == "semantic", use_if_available))
         self._input_sizes = [0] * len(self._inputs)
+
         for i, mode in enumerate(self._inputs):
             if mode == "semantic":
                 # sem_space = observation_space.spaces["semantic"]
@@ -379,36 +386,25 @@ class ResNetEncoder(nn.Module):
             else:
                 self._input_sizes[i] = observation_space.spaces[mode].shape[2]
 
-        # if "rgb" in observation_space.spaces:
-        #     self._n_input_rgb = observation_space.spaces["rgb"].shape[2]
-        #     spatial_size = observation_space.spaces["rgb"].shape[0] // 2
-        # else:
-        #     self._n_input_rgb = 0
-
-        # if "depth" in observation_space.spaces:
-        #     self._n_input_depth = observation_space.spaces["depth"].shape[2]
-        #     spatial_size = observation_space.spaces["depth"].shape[0] // 2
-        # else:
-        #     self._n_input_depth = 0
-        if normalize_visual_inputs:
-            self.running_mean_and_var = RunningMeanAndVar(
-                sum(self._input_sizes)
-            )
-        else:
-            self.running_mean_and_var = nn.Sequential()
-
         if not self.is_blind:
-            spatial_size = observation_space.spaces[self._inputs[0]].shape[0] // 2
+            # spatial_size = observation_space.spaces[self._inputs[0]].shape[0] // 2 # div 2 because of maxpool
+            spatial_size = observation_space.spaces[self._inputs[0]].shape[:2]
+            pre_resnet_compress = (4, 5) if self.obs_transform is None else (2, 2) # ! Hack. this condition == config.FULL_RESNET
+            spatial_size = [d // pre_resnet_compress[i] for i, d in enumerate(spatial_size)]
 
             input_channels = sum(self._input_sizes) # self._n_input_depth + self._n_input_rgb
             self.backbone = make_backbone(input_channels, baseplanes, ngroups)
 
-            final_spatial = int(
-                spatial_size * self.backbone.final_spatial_compress
-            )
-            after_compression_flat_size = 2048
+            # final_spatial = int(
+            #     spatial_size * self.backbone.final_spatial_compress
+            # )
+            final_spatial = np.array([ceil(
+                d * self.backbone.final_spatial_compress
+            ) for d in spatial_size])
+            after_compression_flat_size = 2048 # ? Where does this number come from?
             num_compression_channels = int(
-                round(after_compression_flat_size / (final_spatial ** 2))
+                # round(after_compression_flat_size / (final_spatial ** 2))
+                round(after_compression_flat_size / np.prod(final_spatial))
             )
             self.compression = nn.Sequential(
                 nn.Conv2d(
@@ -424,9 +420,13 @@ class ResNetEncoder(nn.Module):
 
             self.output_shape = (
                 num_compression_channels,
-                final_spatial,
-                final_spatial,
+                # final_spatial,
+                final_spatial[0],
+                # final_spatial,
+                final_spatial[1],
             )
+
+        self.count = 0
 
     @property
     def is_blind(self):
@@ -441,30 +441,53 @@ class ResNetEncoder(nn.Module):
                 if layer.bias is not None:
                     nn.init.constant_(layer.bias, val=0)
 
-    def forward(self, observations):
-        if self.is_blind:
-            return None
+    def forward(self, observations: Dict[str, torch.Tensor], mock_semantics: bool = False) -> torch.Tensor:
+        r"""
+            observations: str-keyed B x C x H x W
+        """
+        # if self.is_blind:
+        #     return None
 
-        cnn_input = []
+        cnn_input: List[torch.Tensor] = []
+
         for mode in self._inputs:
             mode_obs = observations[mode]
-            if mode == "rgb":
-                mode_obs = mode_obs / 255.0  # normalize RGB
-            elif mode == "semantic":
-                categories = mode_obs.long() + 1 # offset -1 -> 0 since embedding can't handle it
-                mode_obs = self.semantic_embedder(categories) # b x h x w x c x H
-                mode_obs = mode_obs.flatten(start_dim=3)
+            if mode == "semantic" and self.semantic_embedder is not None:
+                if self.mock_semantics:
+                    mode_obs = torch.zeros_like(mode_obs, dtype=next(self.parameters()).dtype)\
+                        .unsqueeze(-1).expand(*mode_obs.size(), SEMANTIC_EMBEDDING_SIZE)
+                else:
+                    categories = mode_obs.long() + 1 # offset -1 -> 0 since embedding can't handle it
+                    mode_obs = self.semantic_embedder(categories) # b x h x w -> b x h x w x H
+
+                # mode_obs = mode_obs.flatten(start_dim=3)
             # permute tensor to dimension [BATCH x CHANNEL x HEIGHT X WIDTH]
             mode_obs = mode_obs.permute(0, 3, 1, 2)
             cnn_input.append(mode_obs)
 
-        if self.obs_transform:
+        # print(observations['semantic'].size(), observations['semantic'].sum())
+
+        # print("before")
+        # print(cnn_input[0].size(), cnn_input[0].sum())
+        # print(cnn_input[1].size(), cnn_input[1].sum())
+        # print(cnn_input[2].size(), cnn_input[2].sum())
+
+        if self.obs_transform is not None:
             cnn_input = [self.obs_transform(inp) for inp in cnn_input]
 
-        x = torch.cat(cnn_input, dim=1)
-        x = F.avg_pool2d(x, 2)
+        # print("after")
+        # print(cnn_input[0].size(), cnn_input[0].sum())
+        # print(cnn_input[1].size(), cnn_input[1].sum())
+        # print(cnn_input[2].size(), cnn_input[2].sum())
 
-        x = self.running_mean_and_var(x)
+        x = torch.cat(cnn_input, dim=1)
+        cnn_input = []
+
+        if self.obs_transform is None: # ! Hack. this condition == config.FULL_RESNET is True. We increase this to fit memory.
+            x = F.avg_pool2d(x, (4, 5)) # 480 x 640 ->   120 x 128
+        else:
+            x = F.avg_pool2d(x, 2) # 256 -> 128 x 128
+
         x = self.backbone(x)
         x = self.compression(x)
         return x

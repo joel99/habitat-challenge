@@ -1,0 +1,32 @@
+# * feed-curric.
+
+TRAINER_NAME: "belief-ddppo"
+ENV_NAME: "DummyRLEnv"
+
+BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_mp3d_ego_extreward.yaml"
+# TODO change the above ^
+RL:
+  POLICIES:
+    - "objnav_sparse_reward"
+    - "coverage_explore_reward"
+  SLACK_REWARD: -0.001 # This is also the default, just here as a reminder
+  PPO:
+    hidden_size: 196
+    ROLLOUT:
+      METRICS: ['reached', 'mini_reached', 'visit_count']
+    POLICY:
+      name: "AttentiveBeliefPolicy"
+      USE_SEMANTICS: True
+      EVAL_GT_SEMANTICS: True
+      input_drop: 0.1
+      output_drop: 0.1
+      embed_sge: True
+  AUX_TASKS:
+    tasks: ["CPCA", "CPCA_A", "CPCA_B", "GID", "CoveragePrediction", "ActionDist_A"]
+    required_sensors: ["SEMANTIC_SENSOR"]
+    CoveragePrediction:
+      key: "mini_reached"
+      hidden_size: 32
+      loss_factor: 0.025
+
+

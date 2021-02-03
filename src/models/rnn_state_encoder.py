@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+from torch import nn as nn
 
 
 class RNNStateEncoder(nn.Module):
@@ -102,7 +102,7 @@ class RNNStateEncoder(nn.Module):
 
         # steps in sequence which have zero for any agent. Assume t=0 has
         # a zero in it.
-        has_zeros = (masks[1:] == 0.0).any(dim=-1).nonzero().squeeze().cpu()
+        has_zeros = (masks[1:] == 0.0).any(dim=-1).nonzero(as_tuple=False).squeeze().cpu()
 
         # length n-1
 

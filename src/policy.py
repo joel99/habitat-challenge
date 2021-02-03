@@ -3,29 +3,108 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import abc
+from typing import Dict
+
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.jit import Final
 
-from habitat_baselines.common.utils import CategoricalNet, Flatten
 from .models import RNNStateEncoder, resnet
 from .models.resnet import ResNetEncoder
+from .models.running_mean_and_var import RunningMeanAndVar
+from .models.common import Flatten, CategoricalNet
 
 GOAL_EMBEDDING_SIZE = 32
 
+@torch.jit.script
+def _process_depth(observations: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    if "depth" in observations:
+        depth_observations = observations["depth"]
+
+        depth_observations = torch.clamp(depth_observations, 0.0, 10.0)
+        depth_observations /= 10.0
+
+        observations["depth"] = depth_observations
+
+    return observations
+
+class ObservationSequential(nn.Sequential):
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    r""" Sequential, but with annotation for JIT compatibility in forwarding of dict"""
+    def forward(self, x: Dict[str, torch.Tensor]):
+        for module in self: # copied from sequential
+            x = module(x)
+        return x
+
 class Policy(nn.Module):
-    def __init__(self, net, dim_actions, **kwargs):
+
+    # The following configurations are used in the trainer to create the appropriate rollout
+    # As well as the appropriate auxiliary task wiring
+    # Whether to use multiple beliefs
+    IS_MULTIPLE_BELIEF = False
+    # Whether to section a single belief for auxiliary tasks, keeping a single GRU core
+    IS_SECTIONED = False
+    # Whether the fusion module is an RNN (see RecurrentAttentivePolicy)
+    IS_RECURRENT = False
+    # Has JIT support
+    IS_JITTABLE = False
+    # Policy fuses multiple inputs
+    LATE_FUSION = True
+
+    def __init__(self, net, dim_actions, observation_space=None, config=None, **kwargs):
         super().__init__()
         self.net = net
         self.dim_actions = dim_actions
 
+        actor_head_layers = getattr(config, "ACTOR_HEAD_LAYERS", 1)
+        critic_head_layers = getattr(config, "CRITIC_HEAD_LAYERS", 1)
+
         self.action_distribution = CategoricalNet(
-            self.net.output_size, self.dim_actions
+            self.net.output_size, self.dim_actions, layers=actor_head_layers
         )
-        self.critic = CriticHead(self.net.output_size)
+        self.critic = CriticHead(self.net.output_size, layers=critic_head_layers)
+        if "rgb" in observation_space.spaces:
+            self.running_mean_and_var = RunningMeanAndVar(
+                observation_space.spaces["rgb"].shape[-1]
+                + (
+                    observation_space.spaces["depth"].shape[-1]
+                    if "depth" in observation_space.spaces
+                    else 0
+                ),
+                initial_count=1e4,
+            )
+        else:
+            self.running_mean_and_var = None
 
     def forward(self, *x):
         raise NotImplementedError
+
+    def _preprocess_obs(self, observations):
+        dtype = next(self.parameters()).dtype
+        observations = {k: v.to(dtype=dtype) for k, v in observations.items()}
+         # since this seems to be what running_mean_and_var is expecting
+        observations = {k: v.permute(0, 3, 1, 2) if len(v.size()) == 4 else v for k, v in observations.items()}
+        observations = _process_depth(observations)
+
+        if "rgb" in observations:
+            rgb = observations["rgb"].to(dtype=next(self.parameters()).dtype) / 255.0
+            x = [rgb]
+            if "depth" in observations:
+                x.append(observations["depth"])
+
+            x = self.running_mean_and_var(torch.cat(x, 1))
+            # this preprocesses depth and rgb, but not semantics. we're still embedding that in our encoder
+            observations["rgb"] = x[:, 0:3]
+            if "depth" in observations:
+                observations["depth"] = x[:, 3:]
+        # ! Permute them back, because the rest of our code expects unpermuted
+        observations = {k: v.permute(0, 2, 3, 1) if len(v.size()) == 4 else v for k, v in observations.items()}
+
+        return observations
 
     def act(
         self,
@@ -36,6 +115,7 @@ class Policy(nn.Module):
         deterministic=False,
         **kwargs
     ):
+        observations = self._preprocess_obs(observations)
         features, rnn_hidden_states = self.net(
             observations, rnn_hidden_states, prev_actions, masks
         )
@@ -51,6 +131,7 @@ class Policy(nn.Module):
         return value, action, action_log_probs, rnn_hidden_states
 
     def get_value(self, observations, rnn_hidden_states, prev_actions, masks):
+        observations = self._preprocess_obs(observations)
         features, _ = self.net(
             observations, rnn_hidden_states, prev_actions, masks
         )
@@ -59,6 +140,7 @@ class Policy(nn.Module):
     def evaluate_actions(
         self, observations, rnn_hidden_states, prev_actions, masks, action
     ):
+        observations = self._preprocess_obs(observations)
         features, rnn_hidden_states = self.net(
             observations, rnn_hidden_states, prev_actions, masks
         )
@@ -72,17 +154,26 @@ class Policy(nn.Module):
 
 
 class CriticHead(nn.Module):
-    def __init__(self, input_size):
+    HIDDEN_SIZE = 32
+    def __init__(self, input_size, layers=1):
         super().__init__()
-        self.fc = nn.Linear(input_size, 1)
-        nn.init.orthogonal_(self.fc.weight)
-        nn.init.constant_(self.fc.bias, 0)
+        if layers == 1:
+            self.fc = nn.Linear(input_size, 1)
+            nn.init.orthogonal_(self.fc.weight)
+            nn.init.constant_(self.fc.bias, 0)
+        else: # Only support 2 layers max
+            self.fc = nn.Sequential(
+                nn.Linear(input_size, self.HIDDEN_SIZE),
+                nn.ReLU(),
+                nn.Linear(self.HIDDEN_SIZE, 1)
+            )
+            nn.init.orthogonal_(self.fc[0].weight)
+            nn.init.constant_(self.fc[0].bias, 0)
 
     def forward(self, x):
         return self.fc(x)
 
-
-class BaselinePolicy(Policy):
+class PointNavBaselinePolicy(Policy):
     def __init__(
         self,
         observation_space,
@@ -100,7 +191,27 @@ class BaselinePolicy(Policy):
             action_space.n,
         )
 
-class BaselineNet(nn.Module):
+class Net(nn.Module, metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def forward(self, observations, rnn_hidden_states, prev_actions, masks):
+        pass
+
+    @property
+    @abc.abstractmethod
+    def output_size(self):
+        pass
+
+    @property
+    @abc.abstractmethod
+    def num_recurrent_layers(self):
+        pass
+
+    @property
+    @abc.abstractmethod
+    def is_blind(self):
+        pass
+
+class BaselineNet(Net):
     r"""Network which passes the input image through CNN and passes through RNN.
     """
 
@@ -111,30 +222,30 @@ class BaselineNet(nn.Module):
         goal_sensor_uuid=None,
         additional_sensors=[] # low dim sensors corresponding to registered name
     ):
-        super().__init__()
+        # TODO OURS
         self.goal_sensor_uuid = goal_sensor_uuid
         self.additional_sensors = additional_sensors
-        self._n_input_goal = 0
         self._n_input_goal = 0
         if goal_sensor_uuid is not None and goal_sensor_uuid != "no_sensor":
             self.goal_sensor_uuid = goal_sensor_uuid
             self._initialize_goal_encoder(observation_space)
+        # END
+
         self._hidden_size = hidden_size
 
         resnet_baseplanes = 32
         backbone="resnet18"
-        self.visual_resnet = ResNetEncoder(
+        visual_resnet = ResNetEncoder(
             observation_space,
             baseplanes=resnet_baseplanes,
             ngroups=resnet_baseplanes // 2,
             make_backbone=getattr(resnet, backbone),
-            use_mean_and_var=False,
         )
-        self.visual_encoder = nn.Sequential(
-            self.visual_resnet,
+        self.visual_encoder = ObservationSequential(
+            visual_resnet,
             Flatten(),
             nn.Linear(
-                np.prod(self.visual_resnet.output_shape), hidden_size
+                np.prod(visual_resnet.output_shape), hidden_size
             ),
             nn.ReLU(True),
         )

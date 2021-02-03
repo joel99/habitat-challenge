@@ -1,0 +1,31 @@
+TRAINER_NAME: "belief-ddppo"
+ENV_NAME: "ExploreThenNavRLEnv"
+
+BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_mp3d_ego.yaml"
+RL:
+  COVERAGE_REWARD: 0.25
+  COVERAGE_ATTENUATION: 0.99
+  COVERAGE_VISIT_EXP: 1
+  EXPLORE_GOAL_SEEN_THRESHOLD: 0.05
+  PPO:
+    hidden_size: 196
+    ROLLOUT:
+      METRICS: ['reached', 'mini_reached', 'visit_count', 'goal_vis']
+    POLICY:
+      name: "IMPolicy"
+      USE_SEMANTICS: True
+      EVAL_GT_SEMANTICS: True
+      input_drop: 0.1
+      output_drop: 0.1
+      embed_sge: True
+      IM:
+        comm_interval: 4
+  AUX_TASKS:
+    tasks: ["CPCA", "CPCA_A", "CPCA_B", "GID", "CoveragePrediction", "ActionDist_A"]
+    required_sensors: ["SEMANTIC_SENSOR"]
+    CoveragePrediction:
+        key: "mini_reached"
+        hidden_size: 32
+        loss_factor: 0.025
+  POLICY:
+    PRETRAINED_CKPT: "/srv/share/jye72/objectnav/feed-curpol/feed-curpol.36.pth"

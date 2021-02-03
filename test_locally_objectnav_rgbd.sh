@@ -20,7 +20,9 @@ esac
 done
 
 echo ${CUDA_VISIBLE_DEVICES}
-docker run -v $(pwd)/habitat-challenge-data:/habitat-challenge-data -v /coc/dataset/habitat-sim-datasets/mp3d/:/coc/dataset/habitat-sim-datasets/mp3d/ -v $(pwd)/logs:/logs \
+docker run -v $(pwd)/habitat-challenge-data:/habitat-challenge-data \
+    -v /coc/dataset/habitat-sim-datasets/mp3d/:/coc/dataset/habitat-sim-datasets/mp3d/ \
+    -v $(pwd)/logs:/logs \
     --runtime=nvidia \
     -e "AGENT_EVALUATION_TYPE=local" \
     -e "TRACK_CONFIG_FILE=/challenge_objectnav2020.local.rgbd.yaml" \
