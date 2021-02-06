@@ -355,7 +355,7 @@ class ResNetEncoder(nn.Module):
         spatial_size=128,
         make_backbone=None,
         use_if_available=["rgb", "depth"], # ! This needs to be updated appropriately to just use what it's configured to. Not if available.
-        obs_transform=ResizeCenterCropper(size=(256, 256)),
+        # obs_transform=ResizeCenterCropper(size=(256, 256)),
         mock_semantics=False,
     ):
         for mode in use_if_available:
@@ -364,12 +364,12 @@ class ResNetEncoder(nn.Module):
         self.mock_semantics = mock_semantics
         super().__init__()
 
-        self.obs_transform = obs_transform
-        if self.obs_transform is not None:
-            observation_space = self.obs_transform.transform_observation_space(
-                observation_space
-            )
-
+        self._frame_size = tuple(observation_space.spaces['rgb'].shape[:2])
+        # self.obs_transform = obs_transform
+        # if self.obs_transform is not None:
+        #     observation_space = self.obs_transform.transform_observation_space(
+        #         observation_space
+        #     )
 
         # if ppo_cfg.POLICY.USE_SEMANTICS and not ppo_cfg.POLICY.EVAL_GT_SEMANTICS
         # ! We should really be checking for ^, but we're just assuming it'll be filled in for now
@@ -389,8 +389,16 @@ class ResNetEncoder(nn.Module):
         if not self.is_blind:
             # spatial_size = observation_space.spaces[self._inputs[0]].shape[0] // 2 # div 2 because of maxpool
             spatial_size = observation_space.spaces[self._inputs[0]].shape[:2]
-            pre_resnet_compress = (4, 5) if self.obs_transform is None else (2, 2) # ! Hack. this condition == config.FULL_RESNET
-            spatial_size = [d // pre_resnet_compress[i] for i, d in enumerate(spatial_size)]
+
+            # pre_resnet_compress = (4, 5) if self.obs_transform is None else (2, 2) # ! Hack. this condition == config.FULL_RESNET
+            # spatial_size = [d // pre_resnet_compress[i] for i, d in enumerate(spatial_size)]
+            # Manual computation accounting for average pool
+            if self._frame_size == (256, 256):
+                spatial_size = (128, 128)
+            elif self._frame_size == (240, 320):
+                spatial_size = (120, 108)
+            elif self._frame_size == (480, 640):
+                spatial_size = (120, 108)
 
             input_channels = sum(self._input_sizes) # self._n_input_depth + self._n_input_rgb
             self.backbone = make_backbone(input_channels, baseplanes, ngroups)
@@ -425,8 +433,6 @@ class ResNetEncoder(nn.Module):
                 # final_spatial,
                 final_spatial[1],
             )
-
-        self.count = 0
 
     @property
     def is_blind(self):
@@ -465,28 +471,26 @@ class ResNetEncoder(nn.Module):
             mode_obs = mode_obs.permute(0, 3, 1, 2)
             cnn_input.append(mode_obs)
 
-        # print(observations['semantic'].size(), observations['semantic'].sum())
-
-        # print("before")
-        # print(cnn_input[0].size(), cnn_input[0].sum())
-        # print(cnn_input[1].size(), cnn_input[1].sum())
-        # print(cnn_input[2].size(), cnn_input[2].sum())
-
-        if self.obs_transform is not None:
-            cnn_input = [self.obs_transform(inp) for inp in cnn_input]
-
-        # print("after")
-        # print(cnn_input[0].size(), cnn_input[0].sum())
-        # print(cnn_input[1].size(), cnn_input[1].sum())
-        # print(cnn_input[2].size(), cnn_input[2].sum())
+        # if self.obs_transform is not None:
+            # cnn_input = [self.obs_transform(inp) for inp in cnn_input]
 
         x = torch.cat(cnn_input, dim=1)
         cnn_input = []
 
-        if self.obs_transform is None: # ! Hack. this condition == config.FULL_RESNET is True. We increase this to fit memory.
-            x = F.avg_pool2d(x, (4, 5)) # 480 x 640 ->   120 x 128
-        else:
-            x = F.avg_pool2d(x, 2) # 256 -> 128 x 128
+        if self._frame_size == (256, 256):
+            x = F.avg_pool2d(x, 2)
+        elif self._frame_size == (240, 320):
+            x = F.avg_pool2d(x, (2,3), padding=(0, 1)) # 240 x 324 -> 120 x 108
+        elif self._frame_size == (480, 640):
+            x = F.avg_pool2d(x, (4, 5))
+
+        # if self.obs_transform is None: # ! Hack. this condition == config.FULL_RESNET is True. We increase this to fit memory.
+        #     x = F.avg_pool2d(x, (4, 5))
+        #     # 480 x 640 ->   120 x 128 downsampled to 4 x 4, end shape same
+        #     # 240 x 320 -> 120 x 160 -> 4 x 5.
+        # else:
+        #     # 256 -> 128 x 128 downsamples to 4 x 4, end shape -> 2048 -> 128 x 4 x 4
+        #     x = F.avg_pool2d(x, 2)
 
         x = self.backbone(x)
         x = self.compression(x)

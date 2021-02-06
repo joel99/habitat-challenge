@@ -22,9 +22,10 @@ ADD ckpts/rednet.pth ckpts/rednet.pth
 # ADD ckpts/base_fix-curric.49.pth ckpts/aux.ckpt.pth
 # ADD ckpts/feed-curpol.54.pth ckpts/aux.ckpt.pth
 # ADD ckpts/pt_im4-curpol.57.pth ckpts/aux.ckpt.pth
-ADD ckpts/base4.12.pth ckpts/aux.ckpt.pth
+ADD ckpts/base4-full.12.pth ckpts/aux.ckpt.pth
 
-ADD configs/base4-curric.yaml configs/aux_base.yaml
+ADD configs/obj_base.yaml configs/obj_base.yaml
+ADD configs/base4-full.yaml configs/aux_base.yaml
 ADD aux_agent.py aux_agent.py
 ADD src/ src/
 

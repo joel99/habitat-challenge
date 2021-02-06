@@ -31,17 +31,15 @@ import torch
 from gym import spaces
 from torch import nn
 
-from habitat.config import Config
-from habitat.core.logging import logger
-from habitat_baselines.common.baseline_registry import baseline_registry
-from habitat_baselines.common.utils import (
-# from habitat_baselines.utils.common import (
+from habitat import Config
+
+# TODO FIX
+from .models.common import (
     center_crop,
     get_image_height_width,
     image_resize_shortest_edge,
     overwrite_gym_box_shape,
 )
-
 
 class ObservationTransformer(nn.Module, metaclass=abc.ABCMeta):
     """This is the base ObservationTransformer class that all other observation
@@ -65,7 +63,6 @@ class ObservationTransformer(nn.Module, metaclass=abc.ABCMeta):
         return observations
 
 
-@baseline_registry.register_obs_transformer()
 class ResizeShortestEdge(ObservationTransformer):
     r"""An nn module the resizes your the shortest edge of the input while maintaining aspect ratio.
     This module assumes that all images in the batch are of the same size.
@@ -114,7 +111,8 @@ class ResizeShortestEdge(ObservationTransformer):
                     new_h = int(h * scale)
                     new_w = int(w * scale)
                     new_size = (new_h, new_w)
-                    logger.info(
+                    # logger.info(
+                    print(
                         "Resizing observation of %s: from %s to %s"
                         % (key, (h, w), new_size)
                     )
@@ -153,7 +151,6 @@ class ResizeShortestEdge(ObservationTransformer):
         return cls(config.RL.POLICY.OBS_TRANSFORMS.RESIZE_SHORTEST_EDGE.SIZE)
 
 
-@baseline_registry.register_obs_transformer()
 class CenterCropper(ObservationTransformer):
     """An observation transformer is a simple nn module that center crops your input."""
 
@@ -192,7 +189,8 @@ class CenterCropper(ObservationTransformer):
                     h, w = get_image_height_width(
                         observation_space.spaces[key], channels_last=True
                     )
-                    logger.info(
+                    # logger.info(
+                    print(
                         "Center cropping observation size of %s from %s to %s"
                         % (key, (h, w), size)
                     )
@@ -920,7 +918,8 @@ class ProjectionTransformer(ObservationTransformer):
                 observation_space.spaces[key], channels_last=True
             )
             in_len = self.converter.input_len
-            logger.info(
+            print(
+            # logger.info(
                 f"Overwrite sensor: {key} from size of ({h}, {w}) to image of"
                 f" {self.img_shape} from sensors: {self.sensor_uuids[i*in_len:(i+1)*in_len]}"
             )
@@ -966,7 +965,6 @@ class ProjectionTransformer(ObservationTransformer):
         return observations
 
 
-@baseline_registry.register_obs_transformer()
 class CubeMap2Equirect(ProjectionTransformer):
     r"""This is an experimental use of ObservationTransformer that converts a cubemap
     output to an equirectangular one through projection. This needs to be fed
@@ -1060,7 +1058,6 @@ class Cube2Fisheye(ProjectionConverter):
         )
 
 
-@baseline_registry.register_obs_transformer()
 class CubeMap2Fisheye(ProjectionTransformer):
     r"""This is an experimental use of ObservationTransformer that converts a cubemap
     output to a fisheye one through projection. This needs to be fed
@@ -1155,7 +1152,6 @@ class Equirect2Cube(ProjectionConverter):
         )
 
 
-@baseline_registry.register_obs_transformer()
 class Equirect2CubeMap(ProjectionTransformer):
     r"""This is an experimental use of ObservationTransformer that converts
     an equirectangular image to cubemap images.
@@ -1214,9 +1210,12 @@ def get_active_obs_transforms(config: Config) -> List[ObservationTransformer]:
             config.RL.POLICY.OBS_TRANSFORMS.ENABLED_TRANSFORMS
         )
         for obs_transform_name in obs_transform_names:
-            obs_trans_cls = baseline_registry.get_obs_transformer(
+            # obs_trans_cls = baseline_registry.get_obs_transformer(
+            #     obs_transform_name
+            # )
+            obs_trans_cls = SIMPLE_REGISTRY[
                 obs_transform_name
-            )
+            ]
             obs_transform = obs_trans_cls.from_config(config)
             active_obs_transforms.append(obs_transform)
     return active_obs_transforms
@@ -1237,3 +1236,8 @@ def apply_obs_transforms_obs_space(
     for obs_transform in obs_transforms:
         obs_space = obs_transform.transform_observation_space(obs_space)
     return obs_space
+
+SIMPLE_REGISTRY = {
+    'ResizeShortestEdge': ResizeShortestEdge,
+    'CenterCropper': CenterCropper,
+}

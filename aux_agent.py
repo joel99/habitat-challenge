@@ -25,7 +25,7 @@ from src.encoder_dict import (
     get_vision_encoder_inputs
 )
 
-from src.obs_transforms import (
+from src.obs_transformers import (
     apply_obs_transforms_batch,
     apply_obs_transforms_obs_space,
     get_active_obs_transforms,
@@ -127,7 +127,7 @@ class AuxAgent(Agent):
             self.semantic_predictor = load_rednet(
                 self.device,
                 ckpt="ckpts/rednet.pth", # ppo_cfg.POLICY.EVAL_SEMANTICS_CKPT
-                resize=not self.config.RL.POLICY.FULL_VISION
+                resize=not config.RL.POLICY.FULL_VISION
             )
             self.semantic_predictor.eval()
 

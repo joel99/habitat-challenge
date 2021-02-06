@@ -332,14 +332,14 @@ class BeliefPolicy(Policy):
             self.net.set_streams(self.cuda_streams)
 
         # * Init sensors
-        obs_kwargs = {}
-        if config.FULL_RESNET:
-            obs_kwargs = { "obs_transform": None }
+        # obs_kwargs = {}
+        # if config.FULL_RESNET:
+        #     obs_kwargs = { "obs_transform": None }
         self.visual_encoders = ResnetVisionEncoderSet(
             policy_encoders, observation_space,
             hidden_size=hidden_size,
             mock_semantics=self.mock_objectnav,
-            **obs_kwargs
+            # **obs_kwargs
         )
         if self.IS_JITTABLE and config.jit:
             pass
