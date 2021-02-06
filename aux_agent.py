@@ -25,6 +25,12 @@ from src.encoder_dict import (
     get_vision_encoder_inputs
 )
 
+from src.obs_transforms import (
+    apply_obs_transforms_batch,
+    apply_obs_transforms_obs_space,
+    get_active_obs_transforms,
+)
+
 class AuxAgent(Agent):
     def __init__(self, config: Config):
         max_object_value = 20 # from matterport
@@ -61,6 +67,12 @@ class AuxAgent(Agent):
         observation_spaces = Dict(spaces)
 
         action_spaces = Discrete(4) # ! change to six if we're running action v1
+
+        self.obs_transforms = get_active_obs_transforms(config)
+        observation_spaces = apply_obs_transforms_obs_space(
+            observation_spaces, self.obs_transforms
+        )
+
 
         random.seed(config.RANDOM_SEED)
         torch.random.manual_seed(config.RANDOM_SEED)
@@ -114,7 +126,8 @@ class AuxAgent(Agent):
         if ppo_cfg.POLICY.USE_SEMANTICS:
             self.semantic_predictor = load_rednet(
                 self.device,
-                ckpt="ckpts/rednet.pth" # ppo_cfg.POLICY.EVAL_SEMANTICS_CKPT
+                ckpt="ckpts/rednet.pth", # ppo_cfg.POLICY.EVAL_SEMANTICS_CKPT
+                resize=not self.config.RL.POLICY.FULL_VISION
             )
             self.semantic_predictor.eval()
 
@@ -148,6 +161,8 @@ class AuxAgent(Agent):
         self.not_done_masks = None
         self.prev_actions = None
         self.step = 0
+        self.actor_critic.eval()
+
 
     def reset(self):
         self.test_recurrent_hidden_states = torch.zeros(
@@ -164,14 +179,14 @@ class AuxAgent(Agent):
         )
         self.step = 0
 
+    @torch.no_grad()
     def act(self, observations):
         # if self.step > 350: # 350: # 350 ~ 24.5 hours, 400 should be ok - just kidding.
         #     return 0
         batch = batch_obs([observations], device=self.device) # Why is this put in a list?
-        # for key in batch:
-        #     print(batch[key].size())
         if self.semantic_predictor is not None:
             batch["semantic"] = self.semantic_predictor(batch["rgb"], batch["depth"])
+        batch = apply_obs_transforms_batch(batch, self.obs_transforms)
 
         # print(batch['rgb'].mean(), batch['rgb'].std())
         # print(batch['depth'].mean(), batch['depth'].std())
@@ -182,15 +197,6 @@ class AuxAgent(Agent):
         # pdb.set_trace()
 
         # Substitute 3D GPS (2D provided noted in `nav.py`)
-        # B x H -> B x H + 1
-
-        # if self._dimensionality == 2:
-        #     return np.array(
-        #         [-agent_position[2], agent_position[0]], dtype=np.float32
-        #     )
-        # else:
-        #     return agent_position.astype(np.float32)
-
         if batch['gps'].size(-1) == 2:
             batch["gps"] = torch.stack([
                 batch["gps"][:, 1],

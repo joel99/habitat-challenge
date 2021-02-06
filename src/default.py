@@ -99,6 +99,32 @@ _C.RL.POLICY = CN()
 _C.RL.POLICY.name = "PointNavBaselinePolicy"
 _C.RL.POLICY.PRETRAINED_CKPT = "" # Will load in ckpt (assuming identical arch). Used as quick hack for transplanting reward
 
+_C.RL.POLICY.FULL_VISION = False # Hack to load the right rednet.
+# -----------------------------------------------------------------------------
+# OBS_TRANSFORMS CONFIG
+# -----------------------------------------------------------------------------
+_C.RL.POLICY.OBS_TRANSFORMS = CN()
+_C.RL.POLICY.OBS_TRANSFORMS.ENABLED_TRANSFORMS = tuple()
+_C.RL.POLICY.OBS_TRANSFORMS.CENTER_CROPPER = CN()
+_C.RL.POLICY.OBS_TRANSFORMS.CENTER_CROPPER.HEIGHT = 256
+_C.RL.POLICY.OBS_TRANSFORMS.CENTER_CROPPER.WIDTH = 256
+_C.RL.POLICY.OBS_TRANSFORMS.RESIZE_SHORTEST_EDGE = CN()
+_C.RL.POLICY.OBS_TRANSFORMS.RESIZE_SHORTEST_EDGE.SIZE = 256
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2EQ = CN()
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2EQ.HEIGHT = 256
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2EQ.WIDTH = 512
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2EQ.SENSOR_UUIDS = list()
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2FISH = CN()
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2FISH.HEIGHT = 256
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2FISH.WIDTH = 256
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2FISH.FOV = 180
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2FISH.PARAMS = (0.2, 0.2, 0.2)
+_C.RL.POLICY.OBS_TRANSFORMS.CUBE2FISH.SENSOR_UUIDS = list()
+_C.RL.POLICY.OBS_TRANSFORMS.EQ2CUBE = CN()
+_C.RL.POLICY.OBS_TRANSFORMS.EQ2CUBE.HEIGHT = 256
+_C.RL.POLICY.OBS_TRANSFORMS.EQ2CUBE.WIDTH = 256
+_C.RL.POLICY.OBS_TRANSFORMS.EQ2CUBE.SENSOR_UUIDS = list()
+
 # -----------------------------------------------------------------------------
 # PROXIMAL POLICY OPTIMIZATION (PPO)
 # -----------------------------------------------------------------------------
@@ -136,6 +162,7 @@ _C.RL.PPO.POLICY.use_mean_and_var = False
 _C.RL.PPO.POLICY.pretrained_encoder = False
 _C.RL.PPO.POLICY.pretrained_weights = "/srv/share/ewijmans3/resnet-18-mp3d-rgbd-100m.pth"
 _C.RL.PPO.POLICY.use_cuda_streams = False
+_C.RL.PPO.POLICY.restrict_gps = False # Hack
 _C.RL.PPO.POLICY.embed_actions = False
 _C.RL.PPO.POLICY.embed_sge = False # feature engineering, yay
 _C.RL.PPO.POLICY.input_drop = 0.1

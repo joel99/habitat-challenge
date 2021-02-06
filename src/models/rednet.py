@@ -20,6 +20,9 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
+def debug_tensor(label, tensor):
+    print(label, tensor.size(), tensor.mean().item(), tensor.std().item())
+
 class RedNet(nn.Module):
     def __init__(self, num_classes=40, pretrained=False):
 
@@ -179,7 +182,14 @@ class RedNet(nn.Module):
 
         # block 1
         x = self.layer1(x)
+        # debug_tensor('post1', depth)
+        # for i, mod in enumerate(self.layer1_d):
+        #     depth = mod(depth)
+        #     debug_tensor(f'post1d-{i}', depth)
+
         depth = self.layer1_d(depth)
+        # debug_tensor('post1d', depth)
+
         fuse1 = x + depth
         # block 2
         x = self.layer2(fuse1)
@@ -240,7 +250,7 @@ class RedNet(nn.Module):
         # features_encoder = fuses[-1]
         # scores, features_lastlayer = self.forward_upsample(*fuses)
         scores, *_ = self.forward_upsample(*fuses)
-
+        # debug_tensor('scores', scores)
         # return features_encoder, features_lastlayer, scores
         return scores
 
@@ -341,11 +351,12 @@ class BatchNormalize(nn.Module):
         # std = torch.tensor(self.std, device=x.device)
         # mean = self.mean[None, :, None, None]
         # std = self.std[None, :, None, None]
-        x.sub_(self.mean).div_(self.std)
-        return x
+        return (x - self.mean) / self.std
+        # x.sub_(self.mean).div_(self.std)
+        # return x
 
 class RedNetResizeWrapper(nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, resize=True):
         super().__init__()
         self.rednet = RedNet()
         self.semmap_rgb_norm = BatchNormalize(
@@ -359,6 +370,7 @@ class RedNetResizeWrapper(nn.Module):
             device=device
         )
         self.pretrained_size = (480, 640)
+        self.resize = resize
 
     def forward(self, rgb, depth):
         r"""
@@ -374,83 +386,40 @@ class RedNetResizeWrapper(nn.Module):
                 # ! TODO verify the semantic ids match up -- they seem reasonable...
         """
         # Not quite sure what depth is produced here. Let's just check
-        b, og_h, og_w, _ = rgb.size()
-        device = rgb.device
+        if self.resize:
+            _, og_h, og_w, _ = rgb.size() # b h w c
         rgb = rgb.permute(0, 3, 1, 2)
         depth = depth.permute(0, 3, 1, 2)
 
         rgb = rgb.float() / 255
-        rgb = F.interpolate(rgb, self.pretrained_size, mode='bilinear')
-        depth = F.interpolate(depth, self.pretrained_size, mode='nearest')
-
-        # # Bi-linear
-        # rgb = skimage.transform.resize(rgb, (*self.pretrained_size, b, 3), order=1,
-        #                                 mode='reflect', preserve_range=True)
-        # rgb = torch.tensor(rgb, device=device).float()
-        # rgb = rgb / 255
-        # # Nearest-neighbor
-        # depth = skimage.transform.resize(depth, (*self.pretrained_size, b, 1), order=0,
-        #                                 mode='reflect', preserve_range=True)
-
-        # depth = torch.tensor(depth, device=device)
-
-        # # H x W x B x C -> B x C x H x W
-        # rgb = rgb.permute(2, 3, 0, 1)
-        # depth = depth.permute(2, 3, 0, 1)
+        if self.resize:
+            rgb = F.interpolate(rgb, self.pretrained_size, mode='bilinear')
+            depth = F.interpolate(depth, self.pretrained_size, mode='nearest')
 
         rgb = self.semmap_rgb_norm(rgb)
         depth = self.semmap_depth_norm(depth)
         with torch.no_grad():
-            print('in rednet')
-            print(rgb.size(), rgb.mean().item(), rgb.std().item())
-            print(depth.size(), depth.mean().item(), depth.std().item())
-            # print(next(self.rednet.agant3.parameters()).mean().item())
-            # print(next(self.rednet.parameters()).mean().item())
-            print(sum(i.mean().item() for i in self.rednet.parameters()))
+            # print('in rednet')
+            # debug_tensor('rgb', rgb)
+            # debug_tensor('depth', depth)
+            # print(sum(i.mean().item() for i in self.rednet.parameters()))
+            # Same up to here
             scores = self.rednet(rgb, depth)
-
-            print(scores.size(), scores.mean().item())
-            print("done")
-
+            # Different after this point
+            # print(scores.size(), scores.mean().item())
+            # import pdb
+            # pdb.set_trace()
             pred = (torch.max(scores, 1)[1] + 1).float() # B x 480 x 640
+        if self.resize:
+            pred = F.interpolate(pred.unsqueeze(1), (og_h, og_w), mode='nearest')
 
-        print(pred.size(), pred.sum())
-        # Same at this point
-
-        pred = F.interpolate(pred.unsqueeze(1), (og_h, og_w), mode='nearest')
-
-        import pdb
-        pdb.set_trace()
-
-
-        # for i in range(pred.size(0)):
-        #     color_label(pred[i])
-        #     exit(0)
-
-        # pred = pred.permute(1, 2, 0)
-        # pred = skimage.transform.resize(pred, (og_h, og_w, b), order=0, # Nearest neighbor
-        #                              mode='reflect', preserve_range=True)
-        # return torch.tensor(pred, device=device).unsqueeze(-1)
         return pred.long().squeeze(1)
 
-
-# def color_label(label):
-#     label = label.clone().cpu().data.numpy()
-#     colored_label = np.vectorize(lambda x: label_colours[int(x)])
-
-#     colored = np.asarray(colored_label(label)).astype(np.float32)
-#     colored = colored.squeeze()
-
-#     try:
-#         return torch.from_numpy(colored.transpose([1, 0, 2, 3]))
-#     except ValueError:
-#         return torch.from_numpy(colored[np.newaxis, ...])
-
-def load_rednet(device, ckpt=""):
+def load_rednet(device, ckpt="", resize=True):
     if not os.path.isfile(ckpt):
         raise Exception(f"invalid path {ckpt} provided for rednet weights")
 
-    model = RedNetResizeWrapper(device).to(device)
+    model = RedNetResizeWrapper(device, resize=resize).to(device)
 
     print("=> loading RedNet checkpoint '{}'".format(ckpt))
     if device.type == 'cuda':
