@@ -20,8 +20,6 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
-def debug_tensor(label, tensor):
-    print(label, tensor.size(), tensor.mean().item(), tensor.std().item())
 
 class RedNet(nn.Module):
     def __init__(self, num_classes=40, pretrained=False):

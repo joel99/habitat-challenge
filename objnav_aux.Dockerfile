@@ -12,20 +12,24 @@ ADD submit_aux.sh submit_aux.sh
 # ADD configs/mock_local.local.rgbd.yaml /challenge_objectnav2020.local.rgbd.yaml
 # ADD configs/gps_only.local.rgbd.yaml /challenge_objectnav2020.local.rgbd.yaml
 # ADD configs/hfov_only.local.rgbd.yaml /challenge_objectnav2020.local.rgbd.yaml
-ADD configs/challenge_objectnav2020.local.rgbd.yaml /challenge_objectnav2020.local.rgbd.yaml
 
 ENV AGENT_EVALUATION_TYPE remote
-
 ADD ckpts/rednet.pth ckpts/rednet.pth
+
+ADD configs/challenge_objectnav2020.local.rgbd.yaml /challenge_objectnav2020.local.rgbd.yaml
 
 # ADD ckpts/feed-curric.36.pth ckpts/aux.ckpt.pth
 # ADD ckpts/base_fix-curric.49.pth ckpts/aux.ckpt.pth
 # ADD ckpts/feed-curpol.54.pth ckpts/aux.ckpt.pth
 # ADD ckpts/pt_im4-curpol.57.pth ckpts/aux.ckpt.pth
-ADD ckpts/base4-full.12.pth ckpts/aux.ckpt.pth
+# ADD ckpts/base-full.35.pth ckpts/aux.ckpt.pth
+ADD ckpts/base4-full.35.pth ckpts/aux.ckpt.pth
+# ADD ckpts/pt_sparse-full.35.pth ckpts/aux.ckpt.pth
 
 ADD configs/obj_base.yaml configs/obj_base.yaml
+# ADD configs/base-full.yaml configs/aux_base.yaml
 ADD configs/base4-full.yaml configs/aux_base.yaml
+# ADD configs/pt_sparse-full.yaml configs/aux_base.yaml
 ADD aux_agent.py aux_agent.py
 ADD src/ src/
 

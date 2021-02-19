@@ -112,10 +112,10 @@ class ResizeShortestEdge(ObservationTransformer):
                     new_w = int(w * scale)
                     new_size = (new_h, new_w)
                     # logger.info(
-                    print(
-                        "Resizing observation of %s: from %s to %s"
-                        % (key, (h, w), new_size)
-                    )
+                    # print(
+                    #     "Resizing observation of %s: from %s to %s"
+                    #     % (key, (h, w), new_size)
+                    # )
                     observation_space.spaces[key] = overwrite_gym_box_shape(
                         observation_space.spaces[key], new_size
                     )
@@ -190,10 +190,10 @@ class CenterCropper(ObservationTransformer):
                         observation_space.spaces[key], channels_last=True
                     )
                     # logger.info(
-                    print(
-                        "Center cropping observation size of %s from %s to %s"
-                        % (key, (h, w), size)
-                    )
+                    # print(
+                    #     "Center cropping observation size of %s from %s to %s"
+                    #     % (key, (h, w), size)
+                    # )
 
                     observation_space.spaces[key] = overwrite_gym_box_shape(
                         observation_space.spaces[key], size
@@ -918,11 +918,11 @@ class ProjectionTransformer(ObservationTransformer):
                 observation_space.spaces[key], channels_last=True
             )
             in_len = self.converter.input_len
-            print(
-            # logger.info(
-                f"Overwrite sensor: {key} from size of ({h}, {w}) to image of"
-                f" {self.img_shape} from sensors: {self.sensor_uuids[i*in_len:(i+1)*in_len]}"
-            )
+            # print(
+            # # logger.info(
+            #     f"Overwrite sensor: {key} from size of ({h}, {w}) to image of"
+            #     f" {self.img_shape} from sensors: {self.sensor_uuids[i*in_len:(i+1)*in_len]}"
+            # )
             if (h, w) != self.img_shape:
                 observation_space.spaces[key] = overwrite_gym_box_shape(
                     observation_space.spaces[key], self.img_shape
