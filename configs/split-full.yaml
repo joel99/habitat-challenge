@@ -23,6 +23,7 @@ RL:
       RESIZE_SHORTEST_EDGE:
         SIZE: 240 # -> 240 x 320. try 228 x 300, which is must closer to 256 x 256 area, but is not very round. or 210 x 280
   PPO:
+    SPLIT_IW_BOUNDS: [0.01, 1.0]
     hidden_size: 196
     entropy_coef: 0.0075 # We have more actions, scaling this down. (doesn't learn without scaling down)
     ROLLOUT:

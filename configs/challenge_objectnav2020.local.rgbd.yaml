@@ -47,8 +47,9 @@ TASK:
 
 DATASET:
   TYPE: ObjectNav-v1
-  # SPLIT: val_300
-  # SPLIT: val_22
   SPLIT: val_mini
+  # SPLIT: val_22
+  # SPLIT: val_100
+  # SPLIT: val_300
   DATA_PATH: habitat-challenge-data/objectgoal_mp3d/{split}/{split}.json.gz
   SCENES_DIR: "habitat-challenge-data/data/scene_datasets/"

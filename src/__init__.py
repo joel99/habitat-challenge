@@ -16,11 +16,16 @@ from .im_policy import (
     IMPolicy
 )
 
+from .multipolicy import (
+    AttentiveBeliefMultiPolicy
+)
+
 POLICY_CLASSES = {
     'BeliefPolicy': BeliefPolicy,
     'AttentiveBeliefPolicy': AttentiveBeliefPolicy,
     'RecurrentAttentiveBeliefPolicy': RecurrentAttentiveBeliefPolicy,
     'IMPolicy': IMPolicy,
+    'AttentiveBeliefMultiPolicy': AttentiveBeliefMultiPolicy
 }
 
 __all__ = [

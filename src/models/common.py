@@ -4,10 +4,6 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""
-    This is a copy of habitat_baselines.common.utils from Joel's repo. `habitat-api` has desynced.
-"""
-
 import copy
 import glob
 import numbers
@@ -28,11 +24,16 @@ from distutils.version import StrictVersion
 
 import numpy as np
 import torch
+from torch import Size, Tensor
 import torch.nn as nn
 from torch.nn import functional as F
-from torch import Size, Tensor
-
 from gym.spaces import Box
+
+# from habitat import logger
+# from habitat.utils.visualizations.utils import images_to_video
+# from habitat_baselines.common.tensorboard_utils import TensorboardWriter
+
+# import colorsys
 
 class Flatten(nn.Module):
     def forward(self, x):
@@ -159,7 +160,7 @@ class ResizeCenterCropper(nn.Module):
         if size:
             for key in observation_space.spaces:
                 if key in trans_keys and observation_space.spaces[key].shape[:len(size)] != size:
-                    # logger.info("Overwriting CNN input size of %s: %s" % (key, size))
+                    logger.info("Overwriting CNN input size of %s: %s" % (key, size))
                     observation_space.spaces[key] = overwrite_gym_box_shape(
                         observation_space.spaces[key], size
                     )
@@ -205,7 +206,7 @@ def _to_tensor(v) -> torch.Tensor:
 
 
 def batch_obs(
-    observations: List[Dict], device: Optional[torch.device] = None
+    observations: List[Dict], device: Optional[torch.device] = None, dtype=torch.float,
 ) -> Dict[str, torch.Tensor]:
     r"""Transpose a batch of observation dicts to a dict of batched
     observations.
@@ -219,14 +220,14 @@ def batch_obs(
         transposed dict of lists of observations.
     """
     return batch_list(
-        observations, device=device, whitelist=[[key] for key in observations[0].keys()]
+        observations, device=device, whitelist=[[key] for key in observations[0].keys()], dtype=dtype
     )
 
 def batch_list(
-    list_of_info: List[Dict], device: Optional[torch.device] = None, whitelist: List[List[str]] = []
+    list_of_info: List[Dict], device: Optional[torch.device] = None, whitelist: List[List[str]] = [], dtype=torch.float
 ):
     r"""
-        Batch potentially nested information. Everything is returned as a float.
+        Batch potentially nested information. Everything is returned as `dtype`.
         Each item in the whitelist is the sequence of keys for a particuar item of interest.
     """
     batch = defaultdict(list)
@@ -241,7 +242,7 @@ def batch_list(
             )
 
     for item in batch:
-        batch[item] = torch.stack(batch[item], dim=0).to(dtype=torch.float)
+        batch[item] = torch.stack(batch[item], dim=0).to(dtype=dtype)
 
     return dict(**batch)
 
@@ -270,6 +271,142 @@ def poll_checkpoint_folder(
         return models_paths[ind]
     return None
 
+
+# def generate_video(
+#     video_option: List[str],
+#     video_dir: Optional[str],
+#     images: List[np.ndarray],
+#     episode_id: int,
+#     checkpoint_idx: int,
+#     metrics: Dict[str, float],
+#     tb_writer: TensorboardWriter,
+#     tag: str,
+#     fps: int = 10,
+# ) -> None:
+#     r"""Generate video according to specified information.
+
+#     Args:
+#         video_option: string list of "tensorboard" or "disk" or both.
+#         video_dir: path to target video directory.
+#         images: list of images to be converted to video.
+#         episode_id: episode id for video naming.
+#         checkpoint_idx: checkpoint index for video naming.
+#         metric_name: name of the performance metric, e.g. "spl".
+#         metric_value: value of metric.
+#         tb_writer: tensorboard writer object for uploading video.
+#         fps: fps for generated video.
+#     Returns:
+#         None
+#     """
+#     if len(images) < 1:
+#         return
+
+#     metric_strs = []
+#     for k, v in metrics.items():
+#         if k not in ['coverage.visit_count', 'softspl', 'collisions.count'] and 'reward' not in k:
+#             metric_strs.append(f"{k}={v:.2f}")
+
+#     video_name = f"{tag}-episode={episode_id}-ckpt={checkpoint_idx}-" + "-".join(metric_strs)
+#     if "disk" in video_option:
+#         assert video_dir is not None
+#         images_to_video(images, video_dir, video_name)
+#     if "tensorboard" in video_option:
+#         tb_writer.add_video_from_np_images(
+#             f"episode{episode_id}", checkpoint_idx, images, fps=fps
+#         )
+
+
+def image_resize_shortest_edge(
+    img: Tensor, size: int, channels_last: bool = False, mode='area'
+) -> torch.Tensor:
+    """Resizes an img so that the shortest side is length of size while
+        preserving aspect ratio.
+
+    Args:
+        img: the array object that needs to be resized (HWC) or (NHWC)
+        size: the size that you want the shortest edge to be resize to
+        channels: a boolean that channel is the last dimension
+        mode: interpolation mode as in F.interpolate
+    Returns:
+        The resized array as a torch tensor.
+    """
+    img = torch.as_tensor(img)
+    no_batch_dim = len(img.shape) == 3
+    if len(img.shape) < 3 or len(img.shape) > 5:
+        raise NotImplementedError()
+    if no_batch_dim:
+        img = img.unsqueeze(0)  # Adds a batch dimension
+    h, w = get_image_height_width(img, channels_last=channels_last)
+    if channels_last:
+        if len(img.shape) == 4:
+            # NHWC -> NCHW
+            img = img.permute(0, 3, 1, 2)
+        else:
+            # NDHWC -> NDCHW
+            img = img.permute(0, 1, 4, 2, 3)
+
+    # Percentage resize
+    scale = size / min(h, w)
+    h = int(h * scale)
+    w = int(w * scale)
+    img = torch.nn.functional.interpolate(
+        img.float(), size=(h, w), mode=mode
+    ).to(dtype=img.dtype)
+    if channels_last:
+        if len(img.shape) == 4:
+            # NCHW -> NHWC
+            img = img.permute(0, 2, 3, 1)
+        else:
+            # NDCHW -> NDHWC
+            img = img.permute(0, 1, 3, 4, 2)
+    if no_batch_dim:
+        img = img.squeeze(dim=0)  # Removes the batch dimension
+    return img
+
+
+def center_crop(
+    img: Tensor, size: Union[int, Tuple[int, int]], channels_last: bool = False
+) -> Tensor:
+    """Performs a center crop on an image.
+
+    Args:
+        img: the array object that needs to be resized (either batched or unbatched)
+        size: A sequence (h, w) or a python(int) that you want cropped
+        channels_last: If the channels are the last dimension.
+    Returns:
+        the resized array
+    """
+    h, w = get_image_height_width(img, channels_last=channels_last)
+
+    if isinstance(size, int):
+        size_tuple: Tuple[int, int] = (int(size), int(size))
+    else:
+        size_tuple = size
+    assert len(size_tuple) == 2, "size should be (h,w) you wish to resize to"
+    cropy, cropx = size_tuple
+
+    startx = w // 2 - (cropx // 2)
+    starty = h // 2 - (cropy // 2)
+    if channels_last:
+        return img[..., starty : starty + cropy, startx : startx + cropx, :]
+    else:
+        return img[..., starty : starty + cropy, startx : startx + cropx]
+
+
+def get_image_height_width(
+    img: Union[Box, np.ndarray, torch.Tensor], channels_last: bool = False
+) -> Tuple[int, int]:
+    if img.shape is None or len(img.shape) < 3 or len(img.shape) > 5:
+        raise NotImplementedError()
+    if channels_last:
+        # NHWC
+        h, w = img.shape[-3:-1]
+    else:
+        # NCHW
+        h, w = img.shape[-2:]
+    return h, w
+
+
 def overwrite_gym_box_shape(box: Box, shape) -> Box:
     if box.shape == shape:
         return box
@@ -277,6 +414,95 @@ def overwrite_gym_box_shape(box: Box, shape) -> Box:
     low = box.low if np.isscalar(box.low) else np.min(box.low)
     high = box.high if np.isscalar(box.high) else np.max(box.high)
     return Box(low=low, high=high, shape=shape, dtype=box.dtype)
+
+
+# def image_resize_shortest_edge(
+#     img, size: int, channels_last: bool = False
+# ) -> torch.Tensor:
+#     """Resizes an img so that the shortest side is length of size while
+#         preserving aspect ratio.
+
+#     Args:
+#         img: the array object that needs to be resized (HWC) or (NHWC)
+#         size: the size that you want the shortest edge to be resize to
+#         channels: a boolean that channel is the last dimension
+#     Returns:
+#         The resized array as a torch tensor.
+#     """
+#     img = _to_tensor(img)
+#     no_batch_dim = len(img.shape) == 3
+#     if len(img.shape) < 3 or len(img.shape) > 5:
+#         raise NotImplementedError()
+#     if no_batch_dim:
+#         img = img.unsqueeze(0)  # Adds a batch dimension
+#     if channels_last:
+#         h, w = img.shape[-3:-1]
+#         if len(img.shape) == 4:
+#             # NHWC -> NCHWs
+#             img = img.permute(0, 3, 1, 2)
+#         else:
+#             # NDHWC -> NDCHW
+#             img = img.permute(0, 1, 4, 2, 3)
+#     else:
+#         # ..HW
+#         h, w = img.shape[-2:]
+
+#     # Percentage resize
+#     scale = size / min(h, w)
+#     h = int(h * scale)
+#     w = int(w * scale)
+#     img = torch.nn.functional.interpolate(img.float(), size=(h, w), mode="area").to(
+#         dtype=img.dtype
+#     )
+#     if channels_last:
+#         if len(img.shape) == 4:
+#             # NCHW -> NHWC
+#             img = img.permute(0, 2, 3, 1)
+#         else:
+#             # NDCHW -> NDHWC
+#             img = img.permute(0, 1, 3, 4, 2)
+#     if no_batch_dim:
+#         img = img.squeeze(dim=0)  # Removes the batch dimension
+#     return img
+
+
+# def center_crop(img, size: Tuple[int, int], channels_last: bool = False):
+#     """Performs a center crop on an image.
+
+#     Args:
+#         img: the array object that needs to be resized (either batched or unbatched)
+#         size: A sequence (w, h) or a python(int) that you want cropped
+#         channels_last: If the channels are the last dimension.
+#     Returns:
+#         the resized array
+#     """
+#     if channels_last:
+#         # NHWC
+#         h, w = img.shape[-3:-1]
+#     else:
+#         # NCHW
+#         h, w = img.shape[-2:]
+
+#     if isinstance(size, numbers.Number):
+#         size = (int(size), int(size))
+#     assert len(size) == 2, "size should be (h,w) you wish to resize to"
+#     cropx, cropy = size
+
+#     startx = w // 2 - (cropx // 2)
+#     starty = h // 2 - (cropy // 2)
+#     if channels_last:
+#         return img[..., starty : starty + cropy, startx : startx + cropx, :]
+#     else:
+#         return img[..., starty : starty + cropy, startx : startx + cropx]
+
+
+# def overwrite_gym_box_shape(box: Box, shape) -> Box:
+#     if box.shape == shape:
+#         return box
+#     shape = list(shape) + list(box.shape[len(shape) :])
+#     low = box.low if np.isscalar(box.low) else np.min(box.low)
+#     high = box.high if np.isscalar(box.high) else np.max(box.high)
+#     return Box(low=low, high=high, shape=shape, dtype=box.dtype)
 
 
 class AttrDict(OrderedDict):
@@ -374,93 +600,3 @@ def is_fp16_supported() -> bool:
 
 def is_fp16_autocast_supported() -> bool:
     return StrictVersion(torch.__version__) >= StrictVersion("1.7.1")
-
-def image_resize_shortest_edge(
-    img: Tensor, size: int, channels_last: bool = False, mode='area'
-) -> torch.Tensor:
-    """Resizes an img so that the shortest side is length of size while
-        preserving aspect ratio.
-
-    Args:
-        img: the array object that needs to be resized (HWC) or (NHWC)
-        size: the size that you want the shortest edge to be resize to
-        channels: a boolean that channel is the last dimension
-        mode: interpolation mode as in F.interpolate
-    Returns:
-        The resized array as a torch tensor.
-    """
-    img = torch.as_tensor(img)
-    no_batch_dim = len(img.shape) == 3
-    if len(img.shape) < 3 or len(img.shape) > 5:
-        raise NotImplementedError()
-    if no_batch_dim:
-        img = img.unsqueeze(0)  # Adds a batch dimension
-    h, w = get_image_height_width(img, channels_last=channels_last)
-    if channels_last:
-        if len(img.shape) == 4:
-            # NHWC -> NCHW
-            img = img.permute(0, 3, 1, 2)
-        else:
-            # NDHWC -> NDCHW
-            img = img.permute(0, 1, 4, 2, 3)
-
-    # Percentage resize
-    scale = size / min(h, w)
-    h = int(h * scale)
-    w = int(w * scale)
-    img = torch.nn.functional.interpolate(
-        img.float(), size=(h, w), mode=mode
-    ).to(dtype=img.dtype)
-    if channels_last:
-        if len(img.shape) == 4:
-            # NCHW -> NHWC
-            img = img.permute(0, 2, 3, 1)
-        else:
-            # NDCHW -> NDHWC
-            img = img.permute(0, 1, 3, 4, 2)
-    if no_batch_dim:
-        img = img.squeeze(dim=0)  # Removes the batch dimension
-    return img
-
-
-def center_crop(
-    img: Tensor, size: Union[int, Tuple[int, int]], channels_last: bool = False
-) -> Tensor:
-    """Performs a center crop on an image.
-
-    Args:
-        img: the array object that needs to be resized (either batched or unbatched)
-        size: A sequence (h, w) or a python(int) that you want cropped
-        channels_last: If the channels are the last dimension.
-    Returns:
-        the resized array
-    """
-    h, w = get_image_height_width(img, channels_last=channels_last)
-
-    if isinstance(size, int):
-        size_tuple: Tuple[int, int] = (int(size), int(size))
-    else:
-        size_tuple = size
-    assert len(size_tuple) == 2, "size should be (h,w) you wish to resize to"
-    cropy, cropx = size_tuple
-
-    startx = w // 2 - (cropx // 2)
-    starty = h // 2 - (cropy // 2)
-    if channels_last:
-        return img[..., starty : starty + cropy, startx : startx + cropx, :]
-    else:
-        return img[..., starty : starty + cropy, startx : startx + cropx]
-
-
-def get_image_height_width(
-    img: Union[Box, np.ndarray, torch.Tensor], channels_last: bool = False
-) -> Tuple[int, int]:
-    if img.shape is None or len(img.shape) < 3 or len(img.shape) > 5:
-        raise NotImplementedError()
-    if channels_last:
-        # NHWC
-        h, w = img.shape[-3:-1]
-    else:
-        # NCHW
-        h, w = img.shape[-2:]
-    return h, w

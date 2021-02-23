@@ -150,6 +150,8 @@ _C.RL.PPO.reward_window_size = 50
 _C.RL.PPO.ROLLOUT = CN()
 _C.RL.PPO.ROLLOUT.METRICS = [] # 'reached', 'visit_count', 'goal_vis']
 
+# Split policy clamps
+_C.RL.PPO.SPLIT_IW_BOUNDS = [0.01, 1.0]
 
 # Policy
 _C.RL.PPO.policy = "BASELINE" # Legacy

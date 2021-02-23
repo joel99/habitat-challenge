@@ -24,3 +24,16 @@ docker build . --file objnav_aux.Dockerfile -t objectnav_submission
 evalai push objectnav_submission:latest --phase habitat20-objectnav-minival
 evalai push objectnav_submission:latest --phase habitat20-objectnav-test-std
 <!-- add a --private or --public flag to the push to control submission visibility  -->
+
+# Checklist - things I'm sure match
+- belief_policy, policy
+- encoder_dict
+- obs_transformers
+- default
+- init
+- resnet
+- rednet
+- running_mean_and_var
+- rnn_state_encoder
+- common
+- coarsely, the evaluation loop

@@ -8,6 +8,7 @@
 import argparse
 import random
 import os
+import contextlib
 
 import numpy as np
 import torch
@@ -31,6 +32,8 @@ from src.obs_transformers import (
     get_active_obs_transforms,
 )
 
+AS_DETERMINISTIC_AS_POSSIBLE = True
+
 class AuxAgent(Agent):
     def __init__(self, config: Config):
         if not config.MODEL_PATH:
@@ -38,6 +41,8 @@ class AuxAgent(Agent):
                 "Model checkpoint wasn't provided, quitting."
             )
         self.device = torch.device("cuda:{}".format(config.TORCH_GPU_ID))
+        if AS_DETERMINISTIC_AS_POSSIBLE:
+            self.device = torch.device("cpu")
         ckpt_dict = torch.load(config.MODEL_PATH, map_location=self.device)
 
         # Config
@@ -52,23 +57,7 @@ class AuxAgent(Agent):
 
         self._fp16_autocast = self.config.RL.fp16_mode == "autocast"
 
-        # Agent sensors
-        is_objectnav = "ObjectNav" in task_cfg.TYPE
-        additional_sensors = []
-        embed_goal = False
-        if is_objectnav:
-            additional_sensors = ["gps", "compass"]
-            embed_goal = True
-
-        def _get_policy_head_count(config):
-            reward_keys = config.RL.POLICIES
-            if reward_keys[0] == "none" and len(reward_keys) == 1:
-                return 1
-            if config.RL.REWARD_FUSION.STRATEGY == "SPLIT":
-                return 2
-            return 1
-
-        policy_class = POLICY_CLASSES[ppo_cfg.POLICY.name]
+        # ! Agent setup
         policy_encoders = get_vision_encoder_inputs(ppo_cfg)
 
         # Load spaces (manually)
@@ -102,7 +91,10 @@ class AuxAgent(Agent):
         }
 
         observation_spaces = Dict(spaces)
-        num_acts = ckpt_dict['state_dict']['actor_critic.action_distribution.linear.bias'].size(0)
+        if 'actor_critic.action_distribution.linear.bias' in ckpt_dict['state_dict']:
+            num_acts = ckpt_dict['state_dict']['actor_critic.action_distribution.linear.bias'].size(0)
+        else: # multipolicy
+            num_acts = ckpt_dict['state_dict']['actor_critic.action_distribution.stack.1.linear.bias'].size(0)
         action_spaces = Discrete(num_acts)
 
         self.obs_transforms = get_active_obs_transforms(config)
@@ -110,6 +102,22 @@ class AuxAgent(Agent):
             observation_spaces, self.obs_transforms
         )
 
+        is_objectnav = "ObjectNav" in task_cfg.TYPE
+        additional_sensors = []
+        embed_goal = False
+        if is_objectnav:
+            additional_sensors = ["gps", "compass"]
+            embed_goal = True
+
+        def _get_policy_head_count(config):
+            reward_keys = config.RL.POLICIES
+            if reward_keys[0] == "none" and len(reward_keys) == 1:
+                return 1
+            if config.RL.REWARD_FUSION.STRATEGY == "SPLIT":
+                return 2
+            return 1
+
+        policy_class = POLICY_CLASSES[ppo_cfg.POLICY.name]
         self.actor_critic = policy_class(
             observation_space=observation_spaces,
             action_space=action_spaces,
@@ -125,15 +133,6 @@ class AuxAgent(Agent):
             mock_objectnav=config.MOCK_OBJECTNAV
         ).to(self.device)
 
-        self.semantic_predictor = None
-        if ppo_cfg.POLICY.USE_SEMANTICS:
-            self.semantic_predictor = load_rednet(
-                self.device,
-                ckpt="ckpts/rednet.pth", # ppo_cfg.POLICY.EVAL_SEMANTICS_CKPT
-                resize=True # always to half size
-            )
-            self.semantic_predictor.eval()
-
         self.num_recurrent_memories = self.actor_critic.net.num_tasks
         if self.actor_critic.IS_MULTIPLE_BELIEF:
             proposed_num_beliefs = ppo_cfg.POLICY.BELIEFS.NUM_BELIEFS
@@ -148,8 +147,17 @@ class AuxAgent(Agent):
                 if "actor_critic" in k
             }
         )
-
         self.actor_critic.eval()
+
+        self.semantic_predictor = None
+        if ppo_cfg.POLICY.USE_SEMANTICS:
+            self.semantic_predictor = load_rednet(
+                self.device,
+                ckpt="ckpts/rednet.pth", # ppo_cfg.POLICY.EVAL_SEMANTICS_CKPT
+                resize=True # always to half size
+            )
+            self.semantic_predictor.eval()
+
         self.behavioral_index = 0
         if "extra_state" in ckpt_dict and "step" in ckpt_dict["extra_state"]:
             count_steps = ckpt_dict["extra_state"]["step"]
@@ -157,14 +165,8 @@ class AuxAgent(Agent):
                 self.behavioral_index = 1
 
         # Load other items
-        self.test_recurrent_hidden_states = None
-        self.not_done_masks = None
-        self.prev_actions = None
         self.hidden_size = ppo_cfg.hidden_size
-
-        self.step = 0
-
-    def reset(self):
+        # self.test_recurrent_hidden_states = None
         self.test_recurrent_hidden_states = torch.zeros(
             self.actor_critic.net.num_recurrent_layers,
             1, # num_processes
@@ -172,12 +174,22 @@ class AuxAgent(Agent):
             self.hidden_size,
             device=self.device,
         )
-
-        self.not_done_masks = torch.zeros(1, 1, device=self.device)
+        self.not_done_masks = None
+        # self.prev_actions = None
         self.prev_actions = torch.zeros(
             1, 1, dtype=torch.long, device=self.device
         )
-        self.step = 0
+
+        # self.step = 0
+        # self.ep = 0
+
+    def reset(self):
+        # print(f'{self.ep} reset {self.step}')
+        # We don't reset state because our rnn accounts for masks, and ignore actions because we don't use actions
+        self.not_done_masks = torch.zeros(1, 1, device=self.device, dtype=torch.bool)
+
+        # self.step = 0
+        # self.ep += 1
 
     @torch.no_grad()
     def act(self, observations):
@@ -200,13 +212,13 @@ class AuxAgent(Agent):
                 self.test_recurrent_hidden_states,
                 self.prev_actions,
                 self.not_done_masks,
-                deterministic=False,
+                deterministic=AS_DETERMINISTIC_AS_POSSIBLE,
                 behavioral_index=self.behavioral_index,
             )
-            #  Make masks not done till reset (end of episode) will be called
-            self.not_done_masks.fill_(1.0)
             self.prev_actions.copy_(actions)
-        self.step += 1
+
+        #  Make masks not done till reset (end of episode) will be called
+        self.not_done_masks = torch.ones(1, 1, device=self.device, dtype=torch.bool)
         return actions[0][0].item()
 
     def _setup_eval_config(self, checkpoint_config: Config) -> Config:
@@ -269,9 +281,11 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.random.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
     config.RANDOM_SEED = 7
     config.freeze()
+    torch.set_deterministic(True)
+    # torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     agent = AuxAgent(config)
     if args.evaluation == "local":

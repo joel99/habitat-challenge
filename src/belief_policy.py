@@ -465,7 +465,7 @@ class BeliefPolicy(Policy):
         dist_result = self.action_distribution.dist.act(
             logits, sample=not deterministic
         )
-        return value, dist_result["actions"], dist_result
+        return value, dist_result["actions"], dist_result, logits
 
     @torch.jit.export
     def act(
@@ -476,6 +476,7 @@ class BeliefPolicy(Policy):
         masks,
         deterministic=False,
         return_features=False,
+        return_all_activations=False,
         behavioral_index=0, # for multi-policy. Bounced in single policy
         **kwargs
     ):
@@ -499,8 +500,15 @@ class BeliefPolicy(Policy):
         )
         features = self.output_drop(features)
 
-        value, actions, dist = self.run_policy_act(features, deterministic=deterministic, behavioral_index=0)
+        value, actions, dist, logits = self.run_policy_act(features, deterministic=deterministic, behavioral_index=0)
         action_log_probs = dist["action_log_probs"]
+        if return_all_activations:
+            return (
+                value, actions, action_log_probs, rnn_hidden_states,
+                features, # fused state used for actions
+                obs, # sensor embedding
+                logits, # action logits
+            )
         if return_features:
             return value, actions, action_log_probs, rnn_hidden_states, obs
         return value, actions, action_log_probs, rnn_hidden_states
@@ -621,6 +629,7 @@ class MultipleBeliefPolicy(BeliefPolicy):
         deterministic=False,
         weights_output=None,
         return_features=False,
+        return_all_activations=False,
         behavioral_index=0, # for multi-policy. Bounced in single policy
     ):
         # FIXME phase out
@@ -635,9 +644,16 @@ class MultipleBeliefPolicy(BeliefPolicy):
         if weights_output is not None:
             weights_output.copy_(weights)
 
-        value, actions, dist = self.run_policy_act(features, deterministic=deterministic, behavioral_index=behavioral_index)
+        value, actions, dist, logits = self.run_policy_act(features, deterministic=deterministic, behavioral_index=behavioral_index)
         action_log_probs = dist["action_log_probs"]
 
+        if return_all_activations:
+            return (
+                value, actions, action_log_probs, rnn_hidden_states,
+                features, # fused state used for actions
+                obs, # sensor embedding
+                logits, # action logits
+            )
         if return_features:
             return value, actions, action_log_probs, rnn_hidden_states, obs_dict
         return value, actions, action_log_probs, rnn_hidden_states
