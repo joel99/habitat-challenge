@@ -413,6 +413,14 @@ class BeliefPolicy(Policy):
                 (Should be concat-ed on last dim for use)
         """
         observations  = self._preprocess_obs(observations)
+        # if debug:
+            # print('postprocess')
+            # for key in observations:
+            #     print(key, observations[key].float().mean().cpu().item(), observations[key].float().std().cpu().item())
+                # if observations[key].dtype != torch.long:
+                #     print(key, observations[key].mean().cpu().item(), observations[key].std().cpu().item())
+                # else:
+                #     print(key, observations[key].sum().cpu().item(), observations)
         lowd_embedding = []
 
         if self.goal_sensor_uuid is not None:
@@ -434,6 +442,8 @@ class BeliefPolicy(Policy):
             lowd_embedding.append(self.action_embedder(prev_actions.squeeze(-1)))
         if self.embed_sge:
             lowd_embedding.append(self._extract_sge(observations))
+        # print('here ', self.embed_actions, self.embed_sge, self.additional_sensors, self.goal_sensor_uuid)
+        # print(lowd_embedding)
         return self.visual_encoders(observations), lowd_embedding
 
     @torch.jit.export
@@ -613,10 +623,54 @@ class MultipleBeliefPolicy(BeliefPolicy):
 
     def get_observations_for_beliefs(self, observations, prev_actions):
         # Return b x k x h
+        # if debug:
+        #     print('preprocess')
+        #     for key in observations:
+        #         print(key, observations[key].float().mean().cpu().item(), observations[key].float().std().cpu().item())
+                # if observations[key].dtype != torch.long:
+                #     print(key, observations[key].mean().cpu().item(), observations[key].std().cpu().item())
+                # else:
+                #     print(key, observations[key].sum().cpu().item())
         vision, other = self._get_observation_embeddings(observations, prev_actions)
+
+        # Shockingly, vision is the same.
+        # if debug:
+        #     print('vision', vision['all'].mean().cpu().item(), vision['all'].std().cpu().item())
+        #     print(vision['all'].dtype)
+        #     # Vision is fp 16... but why?
+        #     print('other', list((t.mean().cpu().item(), t.std().cpu().item()) for t in other))
+        # Other is the same as well...
+
+        # Only thought -- maybe the cat-ing of different dtypes isn't seamless?
+        # print('almost there')
+        # for t in other:
+        #     print(t.dtype)
+        # for key in vision:
+        #     print(key, vision[key].dtype)
+        # print('cat')
+
+        # print(torch.cat([vision['all'], *other], dim=-1).mean().cpu().item(), torch.cat([vision['all'], *other], dim=-1).std().cpu().item())
+        # * Manually cast for determinism across EvalAI local and remote
+        # obs = {
+        #     key: torch.cat([embedding.to(other[0].dtype), *other], dim=-1) for key, embedding in vision.items()
+        # }
+        # This doesn't appear to work.. damn.
+        # if debug:
+        #     obs = {}
+        #     for key, embedding in vision.items():
+        #         concat = [embedding, *other] # Pretty inefficient. I probably make four copies...
+        #         print(key, list((t.mean().cpu().item(), t.std().cpu().item(), t.dtype) for t in concat))
+        #         concat = torch.cat(concat, dim=-1)
+        #         print(key, concat.mean().cpu().item(), concat.std().cpu().item())
+        #         obs[key] = concat
+        # else:
         obs = {
             key: torch.cat([embedding, *other], dim=-1) for key, embedding in vision.items()
         }
+
+        # if debug:
+        #     print('obs-ing', obs['all'].mean().cpu().item(), obs['all'].std().cpu().item())
+        # raise Exception('dead')
         return torch.stack([obs[req] for req in self.obs_belief_map], dim=-2), obs
 
     @torch.jit.export
@@ -631,6 +685,7 @@ class MultipleBeliefPolicy(BeliefPolicy):
         return_features=False,
         return_all_activations=False,
         behavioral_index=0, # for multi-policy. Bounced in single policy
+        # debug=False,
     ):
         # FIXME phase out
         if self._double_preprocess_bug:

@@ -17,8 +17,11 @@ ADD ckpts/rednet.pth ckpts/rednet.pth
 
 ADD configs/challenge_objectnav2020.local.rgbd.yaml /challenge_objectnav2020.local.rgbd.yaml
 
+# ADD ckpts/base4-full.35.pth ckpts/aux.ckpt.pth
 # ADD ckpts/base-full.35.pth ckpts/aux.ckpt.pth
-ADD ckpts/base4-full.35.pth ckpts/aux.ckpt.pth
+
+# ADD ckpts/base-full.31.pth ckpts/aux.ckpt.pth
+ADD ckpts/base4-full.33.pth ckpts/aux.ckpt.pth
 # ADD ckpts/pt_sparse-full.35.pth ckpts/aux.ckpt.pth
 # ADD ckpts/split_clamp-full.35.pth ckpts/aux.ckpt.pth
 
