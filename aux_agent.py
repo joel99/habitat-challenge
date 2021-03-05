@@ -41,8 +41,6 @@ class AuxAgent(Agent):
                 "Model checkpoint wasn't provided, quitting."
             )
         self.device = torch.device("cuda:{}".format(config.TORCH_GPU_ID))
-        # if AS_DETERMINISTIC_AS_POSSIBLE: # This times out remote evalai
-            # self.device = torch.device("cpu")
         ckpt_dict = torch.load(config.MODEL_PATH, map_location=self.device)
 
         # Config
@@ -56,8 +54,6 @@ class AuxAgent(Agent):
         task_cfg = config.TASK_CONFIG.TASK
 
         self._fp16_autocast = self.config.RL.fp16_mode == "autocast"
-
-        self._fp16_autocast = False # TEST THIS
 
         # ! Agent setup
         policy_encoders = get_vision_encoder_inputs(ppo_cfg)
@@ -195,10 +191,6 @@ class AuxAgent(Agent):
 
     @torch.no_grad()
     def act(self, observations):
-        # RANDOM TEST
-        # return {"action": np.random.choice(self._POSSIBLE_ACTIONS)} # Parity - baseline
-        # return torch.randint(len(self._POSSIBLE_ACTIONS), (1,)).item() # Parity - checking whether it's torch or syntax
-
         batch = batch_obs([observations], device=self.device) # Why is this put in a list?
         if self.semantic_predictor is not None:
             batch["semantic"] = self.semantic_predictor(batch["rgb"], batch["depth"])
@@ -213,40 +205,6 @@ class AuxAgent(Agent):
                     -batch["gps"][:, 0],
                 ], axis=-1)
 
-            # Looks like `obs` was always different inside.
-            # if self.step == 24 and self.ep == 2: # Crash it - check if obs or recurrent
-            # if self.step == 283 and self.ep == 29: # Crash it - check what's wrong
-            # if self.step == 283 and self.ep == 29: # Crash it - check what's wrong
-                # print('inputs')
-                # print({
-                #     key: vec.sum().item() for key, vec in batch.items()
-                # })
-                # print('state pre step')
-                # print({
-                #     'hidden_mean': self.test_recurrent_hidden_states.mean(-1).cpu().tolist(),
-                #     'hidden_std': self.test_recurrent_hidden_states.std(-1).cpu().tolist(),
-                # })
-            #     value, actions, _, self.test_recurrent_hidden_states, features, obs, _ = self.actor_critic.act(
-            #         batch,
-            #         self.test_recurrent_hidden_states,
-            #         self.prev_actions,
-            #         self.not_done_masks,
-            #         deterministic=AS_DETERMINISTIC_AS_POSSIBLE,
-            #         behavioral_index=self.behavioral_index,
-            #         return_all_activations=True,
-            #         debug=True
-            #     )
-            #     # Obs is different
-            #     raise Exception({
-            #         'features': features.mean().cpu().item(),
-            #         'features_std': features.std().cpu().item(),
-            #         'obs': obs.mean().cpu().item(),
-            #         'obs_std': obs.std().cpu().item(),
-            #         'hidden_mean': self.test_recurrent_hidden_states.mean(-1).cpu().tolist(),
-            #         'hidden_std': self.test_recurrent_hidden_states.std(-1).cpu().tolist(),
-            #         'actions': actions
-            #     })
-            # else:
             _, actions, _, self.test_recurrent_hidden_states = self.actor_critic.act(
                 batch,
                 self.test_recurrent_hidden_states,
@@ -258,46 +216,6 @@ class AuxAgent(Agent):
             self.prev_actions.copy_(actions)
 
         self.not_done_masks = torch.ones(1, 1, device=self.device, dtype=torch.bool) # Reset called externally, we're not done until then
-
-        # return torch.randint(len(self._POSSIBLE_ACTIONS), (1,)).item() # Parity - checking whether it's random state being affected by my agent
-
-        # self.step += 1
-        # if self.step > 30: # * PARITY (1 success) TODO check this again, I'm sus.
-        # if self.step > 31: # ! NO PARITY
-        # if self.step > 31 or self.ep > 15: # ! NO PARITY (whoops)
-        # if self.step > 31 or self.ep > 8: # ! NO PARITY
-        # if self.step > 31 or self.ep > 2: # ! NO PARITY
-        # if self.step > 31 or self.ep > 1: # * PARITY
-        # * So, if we restrict to first episode (which is 31 steps), we have parity. 31 steps of ep 2 is too much, though.
-        # if (self.step > 31 or self.ep > 1) or (self.step > 50 and self.ep == 1): # * PARITY (restricted)
-        # if (self.step > 31 or self.ep > 3) or (self.step > 4 and self.ep == 2): # * PARITY
-        # if (self.step > 31 or self.ep > 3) or (self.step > 18 and self.ep == 2): # * PARITY feck you have a confound, ep down to 2 please
-        # if (self.step > 31 or self.ep >= 3) or (self.step > 24 and self.ep == 2): # * PARITY
-        # if (self.step > 31 or self.ep >= 3) or (self.step > 28 and self.ep == 2): # ! NO PARITY
-        # if (self.step > 31 or self.ep >= 3) or (self.step > 26 and self.ep == 2): # ! NO PARITY
-        # if (self.step > 31 or self.ep >= 3) or (self.step > 25 and self.ep == 2): # ! NO PARITY
-        # In conclusion, self.step == 25 of self.ep == 2 diverges. Why? (Let's look at the hidden states!)
-
-        # if self.step > 31:
-        #     return torch.randint(len(self._POSSIBLE_ACTIONS), (1,)).item()
-        # print(self.ep, len(self.actions[-1]))
-        # self.actions.append(actions[0][0].item())
-        # if self.step == 25 and self.ep == 2:
-        # if self.actions[-1] == 0 or self.step == 500:
-        #     print(len(self.actions), self.actions)
-        #     if self.ep == 29:
-
-        #         raise Exception('done')
-        #     # Now, look at the internal states and observations.
-        #     payload = {}
-        #     # for key in batch:
-        #     #     payload[key] = batch[key].float().std().item()
-        #     # payload['hidden_std'] = self.test_recurrent_hidden_states.std().item()
-        #     payload['hidden_mean'] = self.test_recurrent_hidden_states.mean().item() # Hidden mean is different, std is the same. Inputs are the same.
-        #     # Now trace backwards. where in?
-        #     payload['actions'] = self.actions # Yep. Action 3 locally, instead of action 1 remotely.
-            # raise Exception(payload)
-
         return actions[0][0].item()
 
     def _setup_eval_config(self, checkpoint_config: Config) -> Config:

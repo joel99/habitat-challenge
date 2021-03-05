@@ -20,16 +20,23 @@ ADD configs/challenge_objectnav2020.local.rgbd.yaml /challenge_objectnav2020.loc
 # ADD ckpts/base4-full.35.pth ckpts/aux.ckpt.pth
 # ADD ckpts/base-full.35.pth ckpts/aux.ckpt.pth
 
-# ADD ckpts/base-full.31.pth ckpts/aux.ckpt.pth
-ADD ckpts/base4-full.33.pth ckpts/aux.ckpt.pth
+# ADD ckpts/base4-full.33.pth ckpts/aux.ckpt.pth
+ADD ckpts/base-full.31.pth ckpts/aux.ckpt.pth
 # ADD ckpts/pt_sparse-full.35.pth ckpts/aux.ckpt.pth
-# ADD ckpts/split_clamp-full.35.pth ckpts/aux.ckpt.pth
+# ADD ckpts/split_clamp-full.31.pth ckpts/aux.ckpt.pth
+# ADD ckpts/base4_rednet-full.X.pth ckpts/aux.ckpt.pth # TODO
+# ADD ckpts/base_rednet-full.38.pth ckpts/aux.ckpt.pth
+# ADD ckpts/split_rednet-full.X.pth ckpts/aux.ckpt.pth # TODO
 
 ADD configs/obj_base.yaml configs/obj_base.yaml
-# ADD configs/base-full.yaml configs/aux_base.yaml
-ADD configs/base4-full.yaml configs/aux_base.yaml
+# ADD configs/base4-full.yaml configs/aux_base.yaml
+ADD configs/base-full.yaml configs/aux_base.yaml
 # ADD configs/pt_sparse-full.yaml configs/aux_base.yaml
 # ADD configs/split-full.yaml configs/aux_base.yaml
+# ADD configs/base4_rednet-full.yaml configs/aux_base.yaml
+# ADD configs/base_rednet-full.yaml configs/aux_base.yaml
+# ADD configs/split_rednet-full.yaml configs/aux_base.yaml
+
 ADD aux_agent.py aux_agent.py
 ADD src/ src/
 
