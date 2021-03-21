@@ -193,7 +193,7 @@ class AuxAgent(Agent):
     def act(self, observations):
         batch = batch_obs([observations], device=self.device) # Why is this put in a list?
         if self.semantic_predictor is not None:
-            batch["semantic"] = self.semantic_predictor(batch["rgb"], batch["depth"])
+            batch["semantic"] = self.semantic_predictor(batch["rgb"], batch["depth"]) - 1
         batch = apply_obs_transforms_batch(batch, self.obs_transforms)
 
         with torch.no_grad(), torch.cuda.amp.autocast() if self._fp16_autocast else contextlib.suppress():
@@ -281,7 +281,6 @@ def main():
     config.RANDOM_SEED = 7
     config.freeze()
     torch.set_deterministic(True)
-    # torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
     agent = AuxAgent(config)

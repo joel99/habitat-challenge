@@ -13,7 +13,9 @@ RUN pwd
 ADD submit_aux.sh submit_aux.sh
 
 ENV AGENT_EVALUATION_TYPE remote
-ADD ckpts/rednet.pth ckpts/rednet.pth
+
+# ADD ckpts/rednet.pth ckpts/rednet.pth
+ADD ckpts/rednet_40.pth ckpts/rednet.pth
 
 ADD configs/challenge_objectnav2020.local.rgbd.yaml /challenge_objectnav2020.local.rgbd.yaml
 
@@ -21,12 +23,20 @@ ADD configs/challenge_objectnav2020.local.rgbd.yaml /challenge_objectnav2020.loc
 # ADD ckpts/base-full.35.pth ckpts/aux.ckpt.pth
 
 # ADD ckpts/base4-full.33.pth ckpts/aux.ckpt.pth
-ADD ckpts/base-full.31.pth ckpts/aux.ckpt.pth
-# ADD ckpts/pt_sparse-full.35.pth ckpts/aux.ckpt.pth
+# ADD ckpts/base-full.31.pth ckpts/aux.ckpt.pth
 # ADD ckpts/split_clamp-full.31.pth ckpts/aux.ckpt.pth
+# ADD ckpts/pt_sparse-full.35.pth ckpts/aux.ckpt.pth
 # ADD ckpts/base4_rednet-full.X.pth ckpts/aux.ckpt.pth # TODO
 # ADD ckpts/base_rednet-full.38.pth ckpts/aux.ckpt.pth
-# ADD ckpts/split_rednet-full.X.pth ckpts/aux.ckpt.pth # TODO
+# ADD ckpts/split_rednet-full.37.pth ckpts/aux.ckpt.pth
+# ADD ckpts/split_rednet-full.38.pth ckpts/aux.ckpt.pth
+
+# ADD ckpts/base4_rednet2-full.X.pth ckpts/aux.ckpt.pth
+# ADD ckpts/base_rednet2-full.X.pth ckpts/aux.ckpt.pth
+# ADD ckpts/split_rednet2-full.X.pth ckpts/aux.ckpt.pth
+
+# TODO here -- base4, base, split, all with new rednet
+# Then finetuned variants for each (priority on base and split)
 
 ADD configs/obj_base.yaml configs/obj_base.yaml
 # ADD configs/base4-full.yaml configs/aux_base.yaml
