@@ -193,7 +193,9 @@ class AuxAgent(Agent):
     def act(self, observations):
         batch = batch_obs([observations], device=self.device) # Why is this put in a list?
         if self.semantic_predictor is not None:
-            batch["semantic"] = self.semantic_predictor(batch["rgb"], batch["depth"]) - 1
+            # ! Apply a -1 if you're using 40-cat
+            # ! Don't apply -1 if you're using 21-cat
+            batch["semantic"] = self.semantic_predictor(batch["rgb"], batch["depth"])
         batch = apply_obs_transforms_batch(batch, self.obs_transforms)
 
         with torch.no_grad(), torch.cuda.amp.autocast() if self._fp16_autocast else contextlib.suppress():
@@ -280,8 +282,8 @@ def main():
     torch.random.manual_seed(seed)
     config.RANDOM_SEED = 7
     config.freeze()
-    torch.set_deterministic(True)
-    torch.backends.cudnn.benchmark = False
+    # torch.set_deterministic(True)
+    # torch.backends.cudnn.benchmark = False
 
     agent = AuxAgent(config)
     if args.evaluation == "local":
