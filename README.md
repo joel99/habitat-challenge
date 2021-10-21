@@ -1,9 +1,14 @@
 # Notes
 
-1. Dockerfile is the ultimate source of truth. 2021 file is `objnav_aux.Dockerfile`
-2. Dockerfile will prepare source files and call the runscript. Run script is `submit_aux.sh`
+ObjNav agent submitted to EvalAI for Habitat Challenge 2021. Accompanying "Auxiliary Tasks and Exploration Enable ObjectNav."
+This code may be useful as a reference for a minimal implementation of the agent in the paper.
 
-# EvalAI order
+Main ObjNav repo: https://github.com/joel99/objectnav/
+
+## Some notes on running this code
+- Dockerfile is the ultimate source of truth. 2021 file is `objnav_aux.Dockerfile`
+- Dockerfile will prepare source files and call the runscript. Run script is `submit_aux.sh`
+
 1. Build the agent
 docker build . --file objnav_aux.Dockerfile -t objectnav_submission
 
